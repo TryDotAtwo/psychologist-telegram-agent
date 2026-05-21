@@ -112,8 +112,9 @@ async function refreshDashboardData(force = false) {
       api("/api/users").catch(() => users),
       api("/api/reminders").catch(() => reminders)
     ]);
-    if (selectedClientId && !users.some((user) => user.chatId === selectedClientId)) selectedClientId = users[0]?.chatId || null;
-    if (!selectedClientId && users[0]) selectedClientId = users[0].chatId;
+    const visibleUsers = sortedUsers();
+    if (selectedClientId && !visibleUsers.some((user) => user.chatId === selectedClientId)) selectedClientId = visibleUsers[0]?.chatId || null;
+    if (!selectedClientId && visibleUsers[0]) selectedClientId = visibleUsers[0].chatId;
     renderOverview();
     renderUsers();
     renderProfiles();
@@ -171,9 +172,9 @@ function setupStaticHandlers() {
   document.querySelectorAll("nav button").forEach((button) => button.addEventListener("click", () => openSection(button.dataset.section)));
   document.querySelectorAll("[data-section-jump]").forEach((button) => button.addEventListener("click", () => openSection(button.dataset.sectionJump)));
   document.getElementById("drawerToggle").onclick = toggleDrawer;
+  document.getElementById("mobileDrawerToggle").onclick = toggleDrawer;
   document.getElementById("drawerBackdrop").onclick = closeMobileDrawer;
   document.getElementById("themeToggle").onclick = toggleTheme;
-  document.getElementById("preview").onclick = () => openSection("clients");
   document.getElementById("save").onclick = saveConfig;
   document.getElementById("reset").onclick = load;
   document.getElementById("saveSchedule").onclick = saveSchedule;
@@ -228,9 +229,15 @@ function toggleTheme() {
   localStorage.setItem("dashboard-theme", next);
 }
 
-function toggleDrawer() {
+function toggleDrawer(event) {
   if (innerWidth <= 900) app.classList.toggle("drawer-open");
   else app.classList.toggle("drawer-collapsed");
+  const button = event?.currentTarget;
+  if (button?.classList) {
+    button.classList.remove("psi-spin");
+    void button.offsetWidth;
+    button.classList.add("psi-spin");
+  }
 }
 
 function closeMobileDrawer() {
@@ -241,20 +248,24 @@ function openSection(section) {
   document.querySelectorAll("nav button").forEach((item) => item.classList.toggle("active", item.dataset.section === section));
   document.querySelectorAll("[data-section-panel]").forEach((panel) => panel.classList.toggle("hidden-panel", panel.dataset.sectionPanel !== section));
   const meta = sectionMeta[section] || sectionMeta.overview;
-  document.getElementById("sectionTitle").textContent = meta[0];
-  document.getElementById("sectionSubtitle").textContent = meta[1];
-  document.querySelector(".workspace").scrollTo({ top: 0, behavior: "smooth" });
+  const sectionTitle = document.getElementById("sectionTitle");
+  const sectionSubtitle = document.getElementById("sectionSubtitle");
+  if (sectionTitle) sectionTitle.textContent = meta[0];
+  if (sectionSubtitle) sectionSubtitle.textContent = meta[1];
+  const workspace = document.querySelector(".workspace");
+  if (workspace?.scrollTo) workspace.scrollTo({ top: 0, behavior: "smooth" });
   closeMobileDrawer();
 }
 
 function renderOverview() {
   const scheduledReminders = reminders.filter((reminder) => reminder.status === "scheduled");
-  const riskUsers = users.filter((user) => user.riskLevel === "urgent" || user.riskLevel === "watch");
+  const visibleUsers = sortedUsers();
+  const riskUsers = visibleUsers.filter((user) => user.riskLevel === "urgent" || user.riskLevel === "watch");
   document.getElementById("metricClients").textContent = String(users.length);
   document.getElementById("metricAvailability").textContent = String(availability.length);
   document.getElementById("metricReminders").textContent = String(scheduledReminders.length);
-  document.getElementById("activityList").innerHTML = users.length
-    ? users.slice(0, 6).map((user) => activityRow(user)).join("")
+  document.getElementById("activityList").innerHTML = visibleUsers.length
+    ? visibleUsers.slice(0, 6).map((user) => activityRow(user)).join("")
     : `<div class="empty-state">Пока нет диалогов. Когда клиент напишет боту, карточка появится здесь.</div>`;
   attachClientOpenHandlers(document.getElementById("activityList"));
   document.getElementById("overviewAvailability").innerHTML = availability.length
@@ -450,8 +461,9 @@ function renderBookings() {
 }
 
 function renderUsers() {
-  document.getElementById("clientList").innerHTML = users.length
-    ? users.map((user) => `
+  const visibleUsers = sortedUsers();
+  document.getElementById("clientList").innerHTML = visibleUsers.length
+    ? visibleUsers.map((user) => `
       <button class="client-row ${user.chatId === selectedClientId ? "selected" : ""}" data-client-open="${escapeAttr(user.chatId)}">
         <span><b>${escapeHtml(displayClientName(user))}</b><small>${escapeHtml(clientPreviewText(user, user.lastUserText))}</small></span>
         <em class="risk ${user.riskLevel}">${riskLabel(user.riskLevel)}</em>
@@ -459,12 +471,13 @@ function renderUsers() {
     `).join("")
     : `<div class="empty-state">Клиенты появятся после первых сообщений в Telegram.</div>`;
   attachClientOpenHandlers(document.getElementById("clientList"), "clients");
-  if (!selectedClientId && users[0]) selectedClientId = users[0].chatId;
+  if (!selectedClientId && visibleUsers[0]) selectedClientId = visibleUsers[0].chatId;
 }
 
 function renderProfiles() {
-  document.getElementById("profileList").innerHTML = users.length
-    ? users.map((user) => `
+  const visibleUsers = sortedUsers();
+  document.getElementById("profileList").innerHTML = visibleUsers.length
+    ? visibleUsers.map((user) => `
       <button class="client-row ${user.chatId === selectedClientId ? "selected" : ""}" data-client-open="${escapeAttr(user.chatId)}">
         <span><b>${escapeHtml(displayClientName(user))}</b><small>${escapeHtml(profileListHint(user))}</small></span>
         <em class="risk ${user.riskLevel}">${riskLabel(user.riskLevel)}</em>
@@ -497,7 +510,6 @@ async function renderClient(options = {}) {
     const risk = document.getElementById("clientRisk");
     risk.textContent = "нет риска";
     risk.className = "risk none";
-    document.getElementById("clientSummary").innerHTML = "";
     document.getElementById("consultBrief").innerHTML = `<div class="empty-state">Короткая сводка появится после выбора клиента.</div>`;
     document.getElementById("messageHistory").innerHTML = `<div class="empty-state">Выберите клиента слева.</div>`;
     document.getElementById("resumeBot").classList.add("hidden");
@@ -513,7 +525,6 @@ async function renderClient(options = {}) {
   risk.className = `risk ${user.riskLevel}`;
   const resumeButton = document.getElementById("resumeBot");
   resumeButton.classList.toggle("hidden", !isBotPaused(user));
-  document.getElementById("clientSummary").innerHTML = summaryChips(profile, user);
   renderConsultBrief(user, profile);
   if (options.skipMessages) return;
   await renderMessages(user.chatId);
@@ -604,7 +615,6 @@ async function renderMessages(chatId, options = {}) {
     const key = JSON.stringify(messages);
     if (lastRenderedChatId === chatId && lastMessagesKey === key) return;
     const node = document.getElementById("messageHistory");
-    const wasNearBottom = node.scrollTop + node.clientHeight >= node.scrollHeight - 80;
     node.innerHTML = messages.length
       ? messages.map((message) => `
         <article class="message ${message.role}">
@@ -615,7 +625,7 @@ async function renderMessages(chatId, options = {}) {
       : `<div class="empty-state">История сообщений пока пустая.</div>`;
     lastRenderedChatId = chatId;
     lastMessagesKey = key;
-    if (wasNearBottom || options.forceScroll) node.scrollTop = node.scrollHeight;
+    node.scrollTop = node.scrollHeight;
   } catch (error) {
     if (!options.silent) document.getElementById("messageHistory").innerHTML = `<div class="empty-state">Не удалось загрузить сообщения.</div>`;
   }
@@ -798,6 +808,10 @@ function mergedProfile(user) {
 function profileListHint(user) {
   const profile = mergedProfile(user);
   return first(profile.problems) || first(profile.facts) || user.lastUserText || "нет краткой сводки";
+}
+
+function sortedUsers() {
+  return [...users].sort((a, b) => Date.parse(b.lastMessageAt || 0) - Date.parse(a.lastMessageAt || 0));
 }
 
 function isBotPaused(user) {

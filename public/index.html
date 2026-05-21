@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>НейроПсихолог Telegram-бот</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='10' fill='%2300877f'/%3E%3Ctext x='32' y='43' font-size='34' text-anchor='middle' fill='white'%3E%CE%A8%3C/text%3E%3C/svg%3E" />
-    <link rel="stylesheet" href="./styles.css?v=20260521-7" />
+    <link rel="stylesheet" href="./styles.css?v=20260521-8" />
   </head>
   <body>
     <main class="login-screen" id="loginScreen">
@@ -30,7 +30,7 @@
       <div class="drawer-backdrop" id="drawerBackdrop"></div>
       <aside class="sidebar" id="sidebar">
         <div class="brand">
-          <span class="brand-mark">Ψ</span>
+          <button id="drawerToggle" class="brand-mark brand-toggle" type="button" aria-label="Свернуть или развернуть меню">Ψ</button>
           <div class="brand-copy"><b>НейроПсихолог</b><small>Telegram-бот</small></div>
         </div>
         <nav aria-label="Разделы дашборда">
@@ -52,15 +52,10 @@
 
       <section class="workspace">
         <header class="topbar">
-          <button id="drawerToggle" class="icon-button" aria-label="Открыть меню">☰</button>
-          <div class="topbar-title">
-            <h1 id="sectionTitle">Обзор</h1>
-            <p id="sectionSubtitle">Рабочая очередь, ближайшие записи и состояние бота.</p>
-          </div>
+          <button id="mobileDrawerToggle" class="brand-mark brand-toggle topbar-brand-toggle" type="button" aria-label="Открыть меню">Ψ</button>
+          <div class="topbar-fill"></div>
           <div class="actions">
             <button id="themeToggle" class="icon-button" aria-label="Переключить тему">◐</button>
-            <button id="preview">Предпросмотр</button>
-            <button id="save">Сохранить</button>
           </div>
         </header>
 
@@ -100,7 +95,6 @@
                   <button id="resumeBot" class="secondary small hidden" type="button">Включить бота</button>
                 </div>
               </div>
-              <div id="clientSummary" class="summary-strip"></div>
               <div id="messageHistory" class="message-history"></div>
               <form id="replyForm" class="reply-form">
                 <textarea id="replyText" rows="3" placeholder="Ответ психолога. Сообщение уйдет клиенту в Telegram."></textarea>
@@ -110,9 +104,9 @@
             <aside class="consult-brief">
               <div class="panel-head compact-head">
                 <h2>Короткий профиль</h2>
-                <button data-section-jump="profiles">Подробно</button>
               </div>
               <div id="consultBrief" class="brief-stack"></div>
+              <button class="brief-details-button" data-section-jump="profiles">Подробно</button>
             </aside>
           </div>
         </section>
@@ -213,7 +207,7 @@
 
         <section class="grid hidden-panel" data-section-panel="prompts">
           <article class="panel wide">
-            <div class="panel-head"><h2>Системная инструкция</h2><button id="reset">Загрузить сохраненное</button></div>
+            <div class="panel-head"><h2>Системная инструкция</h2><div class="button-row"><button id="reset">Загрузить сохраненное</button><button id="save">Сохранить</button></div></div>
             <textarea id="systemPrompt" rows="12"></textarea>
             <p class="hint">Бот не ставит диагноз, не обещает лечение и не заменяет экстренную помощь.</p>
           </article>
@@ -271,6 +265,6 @@
         <p id="saveStatus" class="save-status">Данные не загружены.</p>
       </section>
     </main>
-    <script src="./app.js?v=20260521-7"></script>
+    <script src="./app.js?v=20260521-8"></script>
   </body>
 </html>
