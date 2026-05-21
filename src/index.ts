@@ -186,7 +186,11 @@ async function availabilityAnswerForDay(env: Env, client: ClientSummary, duratio
 }
 
 function isAvailabilityRequest(text: string): boolean {
-  return /(запис|свободн|слот|окн|брон|когда|есть|можно|понед|вторн|сред|четвер|пятниц|суббот|воскрес|завтра|послезавтра)/i.test(text);
+  const explicitScheduleWords = /(запис|свободн|слот|окн|брон|расписан|при[её]м|когда.*можно|можно.*(попасть|запис))/i;
+  if (explicitScheduleWords.test(text)) return true;
+  const dayWords = /(понед|вторн|сред|четвер|пятниц|суббот|воскрес|завтра|послезавтра)/i;
+  const dayQuestionWords = /(есть|можно|свободн|окн|слот|запис|при[её]м|время)/i;
+  return dayWords.test(text) && dayQuestionWords.test(text);
 }
 
 function parseAvailabilityDayRequest(text: string, timezone: string): DayRequest | null {
