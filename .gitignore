@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Local Cloudflare state and build output
+.wrangler/
+dist/
+dist-worker/
+.mf/
+
+# Local secrets
+.env
+.env.*
+.dev.vars
+*.local
+
+# Local logs and temporary QA artifacts
+*.log
+.wrangler-dev*.out.log
+.wrangler-dev*.err.log
+coverage/
+*.tsbuildinfo
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

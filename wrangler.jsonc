@@ -1,0 +1,50 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "psychologist-telegram-agent",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-05-21",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": true,
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS"
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "routes": [
+    {
+      "pattern": "xn--80a3aie.xn--p1ai/bot*",
+      "zone_name": "xn--80a3aie.xn--p1ai"
+    }
+  ],
+  "vars": {
+    "TIMEZONE": "Europe/Moscow",
+    "PUBLIC_BOT_NAME": "НейроПсихолог Telegram-бот",
+    "OPENAI_MODEL": "gpt-4.1-mini",
+    "OPENROUTER_MODEL": "openrouter/owl-alpha",
+    "OPENROUTER_BASE_URL": "https://openrouter.ai/api/v1"
+  },
+  "r2_buckets": [
+    {
+      "binding": "BOT_OBJECTS",
+      "bucket_name": "psychologist-bot-objects"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "CHAT_MEMORY",
+        "class_name": "ChatMemory"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["ChatMemory"]
+    }
+  ]
+}
