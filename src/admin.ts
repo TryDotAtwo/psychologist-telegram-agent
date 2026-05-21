@@ -76,7 +76,9 @@ export async function handleAdminApi(request: Request, env: Env): Promise<Respon
   if (request.method === "POST" && url.pathname === "/api/calendar/sync") return Response.json(await syncGoogleCalendarCache(env));
   if (request.method === "GET" && url.pathname === "/api/calendar/status") return Response.json(await calendarConnectionStatus(env));
   if (request.method === "GET" && url.pathname === "/api/telegram/webhook/status") return Response.json(await telegramWebhookStatus(env));
-  if (request.method === "POST" && url.pathname === "/api/telegram/webhook/sync") return Response.json(await syncTelegramWebhook(request, env));
+  if ((request.method === "POST" || request.method === "GET") && url.pathname === "/api/telegram/webhook/sync") {
+    return Response.json(await syncTelegramWebhook(request, env));
+  }
 
   if (request.method === "GET" && url.pathname === "/api/reminders") {
     const chatId = url.searchParams.get("chatId");
@@ -109,7 +111,9 @@ async function telegramWebhookStatus(env: Env): Promise<Record<string, unknown>>
 }
 
 async function syncTelegramWebhook(request: Request, env: Env): Promise<Record<string, unknown>> {
-  const body = (await request.json().catch(() => ({}))) as { url?: string };
+  const requestUrl = new URL(request.url);
+  const body =
+    request.method === "GET" ? { url: requestUrl.searchParams.get("url") ?? undefined } : ((await request.json().catch(() => ({}))) as { url?: string });
   const fallbackUrl = `${new URL(request.url).origin}/telegram/webhook`;
   const webhookUrl = typeof body.url === "string" && body.url.startsWith("https://") ? body.url : fallbackUrl;
   const setResult = await setTelegramWebhook(env, webhookUrl);
