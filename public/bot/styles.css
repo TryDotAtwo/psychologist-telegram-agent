@@ -113,6 +113,7 @@ button:hover, button:focus-visible, a.google-login:hover, a.google-login:focus-v
   grid-template-columns: 248px minmax(0, 1fr);
   transition: grid-template-columns 0.18s ease;
 }
+.drawer-backdrop { display: none; }
 .app.drawer-collapsed { grid-template-columns: 74px minmax(0, 1fr); }
 .sidebar {
   position: sticky;
