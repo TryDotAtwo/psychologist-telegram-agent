@@ -16,6 +16,7 @@ import type { BotConfig, ClientRiskLevel, ClientSummary, Env, TelegramUpdate } f
 
 type ConversationContext = { profile: unknown; turns: { role: string; text: string; createdAt: string }[] };
 type DayRequest = { label: string; fromIso: string; toIso: string };
+const CLIENT_HANDOFF_MS = 24 * 60 * 60 * 1000;
 
 export { ChatMemory };
 
@@ -104,9 +105,26 @@ async function handleText(update: TelegramUpdate, env: Env, ctx: ExecutionContex
   const dayRequest = parseAvailabilityDayRequest(text, env.TIMEZONE || "Europe/Moscow");
   if (/^(\/start|старт)$/i.test(text)) {
     answer =
-      "Здравствуйте. Я помогу с записью, ценами и базовой навигацией по консультациям. Можно написать: свободные окна, цены, записаться или задать вопрос.";
+      "Здравствуйте. Я помогу с записью, ценами и базовой навигацией по консультациям. Можно написать: свободные окна, цены, записаться или связаться с психологом.";
   } else if (/^(цены|прайс)$/i.test(text)) {
     answer = config.prices.map((price) => `${price.serviceId}: ${price.amount} ${price.currency}; ${price.note}`).join("\n");
+  } else if (isHumanContactRequest(text)) {
+    const botPausedUntil = new Date(Date.now() + CLIENT_HANDOFF_MS).toISOString();
+    await upsertClient(env, {
+      chatId,
+      nextAction: "Клиент просит связаться с психологом.",
+      botPausedUntil,
+      botPausedBy: "manual",
+      botPausedReason: "client_requested_psychologist"
+    });
+    await appendStoredJsonl(env, "logs/manual_handoff_events.jsonl", {
+      chatId,
+      action: "client_requested_psychologist",
+      botPausedUntil,
+      createdAt: new Date().toISOString()
+    });
+    answer =
+      "Я передал запрос психологу. Он увидит сообщение в дашборде и ответит здесь, когда сможет.\n\nЕсли сейчас есть риск причинить вред себе или кому-то рядом, пожалуйста, сразу обратитесь в экстренную службу или к человеку рядом.";
   } else if (/^длительность\s+(\d{2,3})/i.test(text)) {
     const minutes = Number(text.match(/^длительность\s+(\d{2,3})/i)?.[1]);
     const client = await upsertClient(env, { chatId, manualProfile: { modalDurationMinutes: minutes } });
@@ -215,6 +233,10 @@ function isAvailabilityRequest(text: string): boolean {
   return dayWords.test(text) && dayQuestionWords.test(text);
 }
 
+function isHumanContactRequest(text: string): boolean {
+  return /^(связаться с психологом|психолог|позвать психолога|нужен психолог|хочу к психологу|задать вопрос)$/i.test(text.trim());
+}
+
 function parseAvailabilityDayRequest(text: string, timezone: string): DayRequest | null {
   const normalized = text.toLowerCase();
   const todayKey = localDateKey(new Date(), timezone);
@@ -266,7 +288,23 @@ function localAssistantFallback(config: BotConfig, text: string): string {
   if (/цен|прайс|стоим|сколько/i.test(text)) {
     return config.prices.map((price) => `${price.serviceId}: ${price.amount} ${price.currency}; ${price.note}`).join("\n");
   }
-  return "Понял сообщение. Я передал его психологу в дашборд. Я уже могу помочь с записью: напишите «свободные окна», «на понедельник есть?» или «цены».";
+  if (/самоуб|суицид|умереть|убить себя|навредить себе|не хочу жить/i.test(text)) {
+    return "Я не могу заменить экстренную помощь. Если есть риск причинить вред себе или сейчас небезопасно, пожалуйста, сразу позвоните в экстренную службу, обратитесь к врачу или к человеку рядом. Если можете, напишите психологу здесь коротко: «нужна срочная помощь».";
+  }
+  if (/тревог|паник|страшно|накрывает|дышать|сердце|дрож/i.test(text)) {
+    return [
+      "Похоже, сейчас тревожно. Можно сделать короткий шаг прямо сейчас:",
+      "1. Поставьте обе стопы на пол и назовите 5 предметов вокруг.",
+      "2. Сделайте 4 спокойных выдоха длиннее вдоха: вдох на 3 счета, выдох на 5 счетов.",
+      "3. Напишите одной фразой: что именно тревожит сильнее всего?",
+      "",
+      "Я не ставлю диагноз и не заменяю психолога. Если нужна живая помощь, нажмите «Связаться с психологом»."
+    ].join("\n");
+  }
+  if (/привет|здравствуй|как дела|что делаешь/i.test(text)) {
+    return "Я на связи. Можно написать, что беспокоит, попросить свободные окна для записи или нажать «Связаться с психологом», если нужен ответ специалиста.";
+  }
+  return "Я понял сообщение. Могу помочь с записью, ценами и первичной навигацией. Если нужен ответ специалиста, нажмите «Связаться с психологом» или напишите, что важно передать психологу.";
 }
 
 function mergeRisk(current: ClientRiskLevel | undefined, next: ClientRiskLevel | undefined): ClientRiskLevel {

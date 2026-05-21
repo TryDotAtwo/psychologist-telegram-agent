@@ -28,7 +28,7 @@ export async function sendTelegramMessage(env: Env, chatId: string, text: string
       reply_markup: {
         keyboard: [
           [{ text: "Записаться" }, { text: "Свободные окна" }],
-          [{ text: "Цены" }, { text: "Задать вопрос" }]
+          [{ text: "Цены" }, { text: "Связаться с психологом" }]
         ],
         resize_keyboard: true
       }

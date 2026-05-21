@@ -1,6 +1,7 @@
 import { calendarConnectionStatus, createBooking, listAvailability, syncGoogleCalendarCache, visibleBusyRanges } from "./calendar";
 import { createGoogleAuthUrl, handleGoogleCallback } from "./google";
 import { memoryStub } from "./memory";
+import { answerWithOpenAI } from "./openai";
 import { cancelReminder, createReminder, sendReminderNow, updateReminder } from "./reminders";
 import {
   appendStoredJsonl,
@@ -32,6 +33,7 @@ export async function handleAdminApi(request: Request, env: Env): Promise<Respon
   if (!authorized(request, env)) return Response.json({ error: "unauthorized" }, { status: 401 });
 
   if (request.method === "GET" && url.pathname === "/api/config") return Response.json(await readConfig(env));
+  if (request.method === "GET" && url.pathname === "/api/ai/status") return Response.json(await aiStatus(env));
   if (request.method === "PUT" && url.pathname === "/api/config") {
     const config = (await request.json()) as BotConfig;
     await writeConfig(env, config);
@@ -100,6 +102,29 @@ export async function handleAdminApi(request: Request, env: Env): Promise<Respon
   if (reminderRoute && request.method === "POST" && reminderRoute.action === "send-now") return Response.json(await sendReminderNow(env, reminderRoute.id) ?? { error: "not_found" });
 
   return Response.json({ error: "not_found" }, { status: 404 });
+}
+
+async function aiStatus(env: Env): Promise<Record<string, unknown>> {
+  const startedAt = Date.now();
+  try {
+    const config = await readConfig(env);
+    const answer = await answerWithOpenAI(env, config, "Проверка связи. Ответь одной короткой фразой: бот готов.", { profile: {}, turns: [] });
+    return {
+      ok: true,
+      provider: env.OPENAI_API_KEY ? "openai" : env.OPENROUTER_API_KEY ? "openrouter" : "none",
+      model: env.OPENAI_API_KEY ? env.OPENAI_MODEL : env.OPENROUTER_MODEL,
+      latencyMs: Date.now() - startedAt,
+      sample: answer.slice(0, 160)
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      provider: env.OPENAI_API_KEY ? "openai" : env.OPENROUTER_API_KEY ? "openrouter" : "none",
+      model: env.OPENAI_API_KEY ? env.OPENAI_MODEL : env.OPENROUTER_MODEL,
+      latencyMs: Date.now() - startedAt,
+      error: error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500)
+    };
+  }
 }
 
 async function telegramWebhookStatus(env: Env): Promise<Record<string, unknown>> {

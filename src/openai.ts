@@ -5,8 +5,28 @@ type ContextPayload = {
   turns: { role: string; text: string; createdAt: string }[];
 };
 
+type OpenRouterPayload = {
+  model?: string;
+  models?: string[];
+  messages: { role: "system" | "user"; content: string }[];
+  tools?: unknown;
+  temperature: number;
+  max_tokens?: number;
+};
+
+type OpenRouterMessageContent = string | { type?: string; text?: string }[] | null | undefined;
+type OpenRouterResponse = {
+  choices?: {
+    text?: string;
+    message?: {
+      content?: OpenRouterMessageContent;
+    };
+  }[];
+};
+
 const ANSWER_TIMEOUT_MS = 12_000;
 const EXTRACTION_TIMEOUT_MS = 6_000;
+const OPENROUTER_FALLBACK_MODEL = "openrouter/free";
 
 export type ClientExtraction = {
   tags?: string[];
@@ -60,8 +80,7 @@ export async function answerWithOpenAI(env: Env, config: BotConfig, userText: st
 
 export async function extractClientProfilePatch(env: Env, config: BotConfig, userText: string, context: ContextPayload): Promise<ClientExtraction | null> {
   if (!env.OPENROUTER_API_KEY) return heuristicExtraction(userText, env.TIMEZONE || "Europe/Moscow");
-  const payload = {
-    model: env.OPENROUTER_MODEL ?? "openrouter/owl-alpha",
+  const payload: OpenRouterPayload = withOpenRouterFallbackModels(env, {
     messages: [
       {
         role: "system",
@@ -82,8 +101,9 @@ export async function extractClientProfilePatch(env: Env, config: BotConfig, use
           "JSON schema: {\"tags\":string[],\"profile\":{\"facts\":string[],\"medications\":string[],\"doctors\":string[],\"appointments\":string[],\"problems\":string[],\"preferences\":string[],\"riskNotes\":string[],\"reminders\":string[],\"sessionHistory\":[],\"modalDurationMinutes\":number|null},\"riskLevel\":\"none|watch|urgent\",\"nextAction\":string|null,\"reminders\":[{\"text\":string,\"dueAt\":ISO8601,\"timezone\":string}]}"
       }
     ],
-    temperature: 0.1
-  };
+    temperature: 0.1,
+    max_tokens: 600
+  });
 
   try {
     const content = await completeOpenRouter(env, payload, EXTRACTION_TIMEOUT_MS);
@@ -95,8 +115,7 @@ export async function extractClientProfilePatch(env: Env, config: BotConfig, use
 
 async function answerWithOpenRouter(env: Env, config: BotConfig, userText: string, context: ContextPayload): Promise<string> {
   const tools = config.searchEnabled && shouldUseWebSearch(userText) ? [{ type: "openrouter:web_search", parameters: { max_results: 3 } }] : undefined;
-  const payload = {
-    model: env.OPENROUTER_MODEL ?? "openrouter/owl-alpha",
+  const payload: OpenRouterPayload = withOpenRouterFallbackModels(env, {
     messages: [
       {
         role: "system",
@@ -112,8 +131,9 @@ async function answerWithOpenRouter(env: Env, config: BotConfig, userText: strin
       { role: "user", content: userText }
     ],
     tools,
-    temperature: 0.4
-  };
+    temperature: 0.4,
+    max_tokens: 520
+  });
 
   try {
     return await completeOpenRouter(env, payload, ANSWER_TIMEOUT_MS);
@@ -123,7 +143,18 @@ async function answerWithOpenRouter(env: Env, config: BotConfig, userText: strin
   }
 }
 
-async function completeOpenRouter(env: Env, payload: unknown, timeoutMs: number): Promise<string> {
+function withOpenRouterFallbackModels(env: Env, payload: Omit<OpenRouterPayload, "model" | "models">): OpenRouterPayload {
+  const models = openRouterModelCandidates(env);
+  if (models.length === 1) return { ...payload, model: models[0] };
+  return { ...payload, models };
+}
+
+function openRouterModelCandidates(env: Env): string[] {
+  const configured = env.OPENROUTER_MODEL?.trim() || "openrouter/owl-alpha";
+  return [...new Set([configured, OPENROUTER_FALLBACK_MODEL])];
+}
+
+async function completeOpenRouter(env: Env, payload: OpenRouterPayload, timeoutMs: number): Promise<string> {
   const baseUrl = env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1";
   const response = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
     method: "POST",
@@ -140,10 +171,23 @@ async function completeOpenRouter(env: Env, payload: unknown, timeoutMs: number)
     const body = await response.text();
     throw new Error(`openrouter_status=${response.status}; body=${body.slice(0, 500)}`);
   }
-  const data = (await response.json()) as { choices?: { message?: { content?: string } }[] };
-  const text = data.choices?.[0]?.message?.content;
+  const data = (await response.json()) as OpenRouterResponse;
+  const text = extractOpenRouterText(data);
   if (!text) throw new Error("openrouter_empty_message_content");
   return text;
+}
+
+function extractOpenRouterText(data: OpenRouterResponse): string {
+  const choice = data.choices?.[0];
+  const content = choice?.message?.content;
+  if (typeof content === "string") return content.trim();
+  if (Array.isArray(content)) {
+    return content
+      .map((item) => (item.type === "text" || !item.type ? item.text ?? "" : ""))
+      .join("")
+      .trim();
+  }
+  return choice?.text?.trim() ?? "";
 }
 
 function shouldUseWebSearch(text: string): boolean {
