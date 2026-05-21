@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>НейроПсихолог Telegram-бот</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='10' fill='%2300877f'/%3E%3Ctext x='32' y='43' font-size='34' text-anchor='middle' fill='white'%3E%CE%A8%3C/text%3E%3C/svg%3E" />
-    <link rel="stylesheet" href="./styles.css?v=20260521-3" />
+    <link rel="stylesheet" href="./styles.css?v=20260521-4" />
   </head>
   <body>
     <main class="login-screen" id="loginScreen">
@@ -26,7 +26,7 @@
       </section>
     </main>
 
-    <main class="app hidden drawer-collapsed" id="app">
+    <main class="app hidden" id="app">
       <div class="drawer-backdrop" id="drawerBackdrop"></div>
       <aside class="sidebar" id="sidebar">
         <div class="brand">
@@ -34,14 +34,14 @@
           <div class="brand-copy"><b>НейроПсихолог</b><small>Telegram-бот</small></div>
         </div>
         <nav aria-label="Разделы дашборда">
-          <button class="active" data-section="overview"><span>Обзор</span></button>
-          <button data-section="clients"><span>Клиенты</span></button>
-          <button data-section="profiles"><span>Профили</span></button>
-          <button data-section="calendar"><span>Календарь</span></button>
-          <button data-section="prompts"><span>Инструкции</span></button>
-          <button data-section="services"><span>Услуги</span></button>
-          <button data-section="google"><span>Google</span></button>
-          <button data-section="security"><span>Безопасность</span></button>
+          <button class="active" data-section="overview" data-icon="О" title="Обзор"><span>Обзор</span></button>
+          <button data-section="clients" data-icon="Ч" title="Клиенты"><span>Клиенты</span></button>
+          <button data-section="profiles" data-icon="П" title="Профили"><span>Профили</span></button>
+          <button data-section="calendar" data-icon="К" title="Календарь"><span>Календарь</span></button>
+          <button data-section="prompts" data-icon="И" title="Инструкции"><span>Инструкции</span></button>
+          <button data-section="services" data-icon="₽" title="Услуги"><span>Услуги</span></button>
+          <button data-section="google" data-icon="G" title="Google"><span>Google</span></button>
+          <button data-section="security" data-icon="З" title="Безопасность"><span>Безопасность</span></button>
         </nav>
         <section class="status">
           <b id="sidebarStatus">Бот активен</b>
@@ -250,6 +250,6 @@
         <p id="saveStatus" class="save-status">Данные не загружены.</p>
       </section>
     </main>
-    <script src="./app.js?v=20260521-3"></script>
+    <script src="./app.js?v=20260521-4"></script>
   </body>
 </html>

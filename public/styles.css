@@ -159,18 +159,30 @@ nav button {
   color: var(--text);
 }
 nav button::before {
-  content: "";
-  width: 10px;
-  height: 10px;
-  border-radius: 3px;
-  background: var(--line);
+  content: attr(data-icon);
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
   flex: 0 0 auto;
+}
+.drawer-collapsed nav button {
+  justify-content: center;
+  padding: 10px 6px;
 }
 nav button.active {
   background: var(--teal);
   color: #fff;
 }
-nav button.active::before { background: #fff; }
+nav button.active::before {
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+}
 .status {
   margin-top: auto;
   border: 1px solid var(--line);
