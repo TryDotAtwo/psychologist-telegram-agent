@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>НейроПсихолог Telegram-бот</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='10' fill='%2300877f'/%3E%3Ctext x='32' y='43' font-size='34' text-anchor='middle' fill='white'%3E%CE%A8%3C/text%3E%3C/svg%3E" />
-    <link rel="stylesheet" href="./styles.css?v=20260521-5" />
+    <link rel="stylesheet" href="./styles.css?v=20260521-6" />
   </head>
   <body>
     <main class="login-screen" id="loginScreen">
@@ -95,7 +95,10 @@
             <section class="chat-panel">
               <div class="chat-head">
                 <div><h2 id="clientName">Клиент не выбран</h2><p id="clientMeta">Выберите диалог слева.</p></div>
-                <span id="clientRisk" class="risk none">нет риска</span>
+                <div class="chat-actions">
+                  <span id="clientRisk" class="risk none">нет риска</span>
+                  <button id="resumeBot" class="secondary small hidden" type="button">Включить бота</button>
+                </div>
               </div>
               <div id="clientSummary" class="summary-strip"></div>
               <div id="messageHistory" class="message-history"></div>
@@ -250,6 +253,6 @@
         <p id="saveStatus" class="save-status">Данные не загружены.</p>
       </section>
     </main>
-    <script src="./app.js?v=20260521-5"></script>
+    <script src="./app.js?v=20260521-6"></script>
   </body>
 </html>

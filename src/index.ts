@@ -80,9 +80,25 @@ async function handleText(update: TelegramUpdate, env: Env, ctx: ExecutionContex
     method: "POST",
     body: JSON.stringify({ role: "user", text, createdAt: receivedAt })
   });
+  await appendStoredJsonl(env, `transcripts/${chatId}.jsonl`, {
+    role: "user",
+    text,
+    createdAt: receivedAt,
+    source: "telegram"
+  });
 
   const context = (await memory.fetch("https://memory/context").then((response) => response.json())) as ConversationContext;
   ctx.waitUntil(extractAndStoreClientSignals(env, config, chatId, text, context));
+
+  if (isBotPaused(baseClient)) {
+    await appendStoredJsonl(env, "logs/manual_handoff_suppressed.jsonl", {
+      chatId,
+      text: text.slice(0, 500),
+      botPausedUntil: baseClient.botPausedUntil,
+      createdAt: receivedAt
+    });
+    return;
+  }
 
   let answer: string;
   const dayRequest = parseAvailabilityDayRequest(text, env.TIMEZONE || "Europe/Moscow");
@@ -137,11 +153,17 @@ async function handleText(update: TelegramUpdate, env: Env, ctx: ExecutionContex
   });
   await upsertClient(env, { chatId, lastMessageAt: answeredAt, lastAssistantText: answer });
   await appendStoredJsonl(env, `transcripts/${chatId}.jsonl`, {
-    user: text,
-    assistant: answer,
-    createdAt: answeredAt
+    role: "assistant",
+    text: answer,
+    createdAt: answeredAt,
+    source: "bot"
   });
   await sendTelegramMessage(env, chatId, answer);
+}
+
+function isBotPaused(client: ClientSummary): boolean {
+  const timestamp = Date.parse(client.botPausedUntil || "");
+  return Number.isFinite(timestamp) && timestamp > Date.now();
 }
 
 async function extractAndStoreClientSignals(env: Env, config: BotConfig, chatId: string, text: string, context: ConversationContext): Promise<void> {

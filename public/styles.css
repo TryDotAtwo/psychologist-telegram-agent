@@ -106,6 +106,11 @@ button:hover, button:focus-visible, a.google-login:hover, a.google-login:focus-v
   background: var(--surface);
   padding: 8px 12px;
 }
+button.small, a.google-login.small {
+  min-height: 30px;
+  padding: 5px 9px;
+  font-size: 13px;
+}
 
 .app {
   min-height: 100vh;
@@ -345,6 +350,17 @@ p { margin: 6px 0 0; color: var(--muted); line-height: 1.45; }
   gap: 12px;
   border-bottom: 1px solid var(--line);
   padding-bottom: 12px;
+}
+.chat-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.chat-actions .secondary.small {
+  width: auto;
+  min-width: 0;
 }
 .summary-strip {
   display: grid;

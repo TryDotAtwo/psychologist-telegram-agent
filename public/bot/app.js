@@ -7,6 +7,11 @@ let users = [];
 let reminders = [];
 let selectedClientId = null;
 let selectedAvailabilityId = null;
+let refreshTimer = null;
+let messageRefreshTimer = null;
+let refreshInFlight = false;
+let lastRenderedChatId = null;
+let lastMessagesKey = "";
 
 const loginScreen = document.getElementById("loginScreen");
 const app = document.getElementById("app");
@@ -73,6 +78,7 @@ async function load() {
   renderAll();
   loginScreen.classList.add("hidden");
   app.classList.remove("hidden");
+  startRealtimeRefresh();
   document.getElementById("saveStatus").textContent = "Данные загружены.";
 }
 
@@ -82,6 +88,43 @@ async function loadAvailability(duration = 30) {
   const result = await api(`/api/calendar/availability?from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(to.toISOString())}&durationMinutes=${duration}`);
   availability = result.availability || [];
   busy = result.busy || [];
+}
+
+function startRealtimeRefresh() {
+  stopRealtimeRefresh();
+  refreshTimer = setInterval(refreshDashboardData, 5000);
+  messageRefreshTimer = setInterval(refreshSelectedMessages, 2500);
+}
+
+function stopRealtimeRefresh() {
+  if (refreshTimer) clearInterval(refreshTimer);
+  if (messageRefreshTimer) clearInterval(messageRefreshTimer);
+  refreshTimer = null;
+  messageRefreshTimer = null;
+}
+
+async function refreshDashboardData(force = false) {
+  if (app.classList.contains("hidden") || (refreshInFlight && !force)) return;
+  refreshInFlight = true;
+  try {
+    [users, reminders] = await Promise.all([
+      api("/api/users").catch(() => users),
+      api("/api/reminders").catch(() => reminders)
+    ]);
+    if (selectedClientId && !users.some((user) => user.chatId === selectedClientId)) selectedClientId = users[0]?.chatId || null;
+    if (!selectedClientId && users[0]) selectedClientId = users[0].chatId;
+    renderOverview();
+    renderUsers();
+    renderProfiles();
+    await renderClient({ skipMessages: true });
+  } finally {
+    refreshInFlight = false;
+  }
+}
+
+async function refreshSelectedMessages() {
+  if (app.classList.contains("hidden") || !selectedClientId) return;
+  await renderMessages(selectedClientId, { silent: true });
 }
 
 function renderAll() {
@@ -119,6 +162,7 @@ function setupStaticHandlers() {
 
   document.getElementById("logout").onclick = async () => {
     await api("/api/logout", { method: "POST", body: "{}" });
+    stopRealtimeRefresh();
     app.classList.add("hidden");
     loginScreen.classList.remove("hidden");
   };
@@ -158,6 +202,7 @@ function setupStaticHandlers() {
     renderDetailedProfile();
   };
   document.getElementById("replyForm").onsubmit = sendReply;
+  document.getElementById("resumeBot").onclick = resumeBotForClient;
   document.getElementById("saveClientProfile").onclick = saveClientProfile;
   document.getElementById("addReminder").onclick = addManualReminder;
   document.getElementById("addService").onclick = addService;
@@ -215,7 +260,7 @@ function renderOverview() {
 function activityRow(user) {
   return `
     <button class="activity-row" data-client-open="${escapeAttr(user.chatId)}">
-      <span><b>${escapeHtml(displayClientName(user))}</b><small>${escapeHtml(user.lastUserText || "Нет текста")}</small></span>
+      <span><b>${escapeHtml(displayClientName(user))}</b><small>${escapeHtml(clientPreviewText(user, user.lastUserText))}</small></span>
       <em class="risk ${user.riskLevel}">${riskLabel(user.riskLevel)}</em>
     </button>
   `;
@@ -401,7 +446,7 @@ function renderUsers() {
   document.getElementById("clientList").innerHTML = users.length
     ? users.map((user) => `
       <button class="client-row ${user.chatId === selectedClientId ? "selected" : ""}" data-client-open="${escapeAttr(user.chatId)}">
-        <span><b>${escapeHtml(displayClientName(user))}</b><small>${escapeHtml(user.lastUserText || "Нет текста")}</small></span>
+        <span><b>${escapeHtml(displayClientName(user))}</b><small>${escapeHtml(clientPreviewText(user, user.lastUserText))}</small></span>
         <em class="risk ${user.riskLevel}">${riskLabel(user.riskLevel)}</em>
       </button>
     `).join("")
@@ -426,6 +471,8 @@ function attachClientOpenHandlers(root, targetSection = "clients") {
   root.querySelectorAll("[data-client-open]").forEach((button) => {
     button.addEventListener("click", () => {
       selectedClientId = button.dataset.clientOpen;
+      lastRenderedChatId = null;
+      lastMessagesKey = "";
       openSection(targetSection);
       renderUsers();
       renderProfiles();
@@ -435,7 +482,7 @@ function attachClientOpenHandlers(root, targetSection = "clients") {
   });
 }
 
-async function renderClient() {
+async function renderClient(options = {}) {
   const user = users.find((item) => item.chatId === selectedClientId);
   if (!user) {
     document.getElementById("clientName").textContent = "Клиент не выбран";
@@ -446,16 +493,22 @@ async function renderClient() {
     document.getElementById("clientSummary").innerHTML = "";
     document.getElementById("consultBrief").innerHTML = `<div class="empty-state">Короткая сводка появится после выбора клиента.</div>`;
     document.getElementById("messageHistory").innerHTML = `<div class="empty-state">Выберите клиента слева.</div>`;
+    document.getElementById("resumeBot").classList.add("hidden");
+    lastRenderedChatId = null;
+    lastMessagesKey = "";
     return;
   }
   const profile = mergedProfile(user);
   document.getElementById("clientName").textContent = displayClientName(user);
-  document.getElementById("clientMeta").textContent = `chat_id=${user.chatId}; сообщений=${user.messageCount}`;
+  document.getElementById("clientMeta").textContent = `chat_id=${user.chatId}; сообщений=${user.messageCount}; ${botModeLabel(user)}`;
   const risk = document.getElementById("clientRisk");
   risk.textContent = riskLabel(user.riskLevel);
   risk.className = `risk ${user.riskLevel}`;
+  const resumeButton = document.getElementById("resumeBot");
+  resumeButton.classList.toggle("hidden", !isBotPaused(user));
   document.getElementById("clientSummary").innerHTML = summaryChips(profile, user);
   renderConsultBrief(user, profile);
+  if (options.skipMessages) return;
   await renderMessages(user.chatId);
 }
 
@@ -498,6 +551,7 @@ function renderConsultBrief(user, profile) {
     ["Лекарства", first(profile.medications) || "нет данных"],
     ["Врачи", first(profile.doctors) || "нет данных"],
     ["Риск", riskLabel(user.riskLevel)],
+    ["Режим общения", botModeLabel(user)],
     ["Следующее действие", user.nextAction || "нет"],
     ["Напоминание", scheduled[0] ? `${humanDateTime(scheduled[0].dueAt)} · ${scheduled[0].text}` : first(profile.reminders) || "нет"]
   ];
@@ -523,16 +577,22 @@ function summaryChips(profile, user) {
     ["Лекарства", first(profile.medications)],
     ["Врачи", first(profile.doctors)],
     ["Проблемы", first(profile.problems)],
+    ["Режим", botModeLabel(user)],
     ["Напоминания", first(profile.reminders)],
     ["Следующее", user.nextAction || "нет"]
   ];
   return chips.map(([label, value]) => `<div class="summary-chip"><b>${label}</b><span>${escapeHtml(value || "нет")}</span></div>`).join("");
 }
 
-async function renderMessages(chatId) {
+async function renderMessages(chatId, options = {}) {
   try {
     const messages = await api(`/api/users/${encodeURIComponent(chatId)}/messages`);
-    document.getElementById("messageHistory").innerHTML = messages.length
+    if (chatId !== selectedClientId) return;
+    const key = JSON.stringify(messages);
+    if (lastRenderedChatId === chatId && lastMessagesKey === key) return;
+    const node = document.getElementById("messageHistory");
+    const wasNearBottom = node.scrollTop + node.clientHeight >= node.scrollHeight - 80;
+    node.innerHTML = messages.length
       ? messages.map((message) => `
         <article class="message ${message.role}">
           <p>${escapeHtml(message.text)}</p>
@@ -540,8 +600,11 @@ async function renderMessages(chatId) {
         </article>
       `).join("")
       : `<div class="empty-state">История сообщений пока пустая.</div>`;
+    lastRenderedChatId = chatId;
+    lastMessagesKey = key;
+    if (wasNearBottom || options.forceScroll) node.scrollTop = node.scrollHeight;
   } catch (error) {
-    document.getElementById("messageHistory").innerHTML = `<div class="empty-state">Не удалось загрузить сообщения.</div>`;
+    if (!options.silent) document.getElementById("messageHistory").innerHTML = `<div class="empty-state">Не удалось загрузить сообщения.</div>`;
   }
 }
 
@@ -551,7 +614,18 @@ async function sendReply(event) {
   if (!selectedClientId || !text) return;
   await api(`/api/users/${encodeURIComponent(selectedClientId)}/reply`, { method: "POST", body: JSON.stringify({ text }) });
   document.getElementById("replyText").value = "";
-  await renderMessages(selectedClientId);
+  lastMessagesKey = "";
+  await refreshDashboardData(true);
+  await renderMessages(selectedClientId, { forceScroll: true });
+  document.getElementById("saveStatus").textContent = "Ответ отправлен. Бот поставлен на паузу для этого клиента.";
+}
+
+async function resumeBotForClient() {
+  if (!selectedClientId) return;
+  const result = await api(`/api/users/${encodeURIComponent(selectedClientId)}/bot/resume`, { method: "POST", body: "{}" });
+  if (result.client) users = users.map((item) => (item.chatId === result.client.chatId ? result.client : item));
+  await refreshDashboardData(true);
+  document.getElementById("saveStatus").textContent = "Автоответы бота включены для выбранного клиента.";
 }
 
 async function saveClientProfile() {
@@ -692,6 +766,20 @@ function mergedProfile(user) {
 function profileListHint(user) {
   const profile = mergedProfile(user);
   return first(profile.problems) || first(profile.facts) || user.lastUserText || "нет краткой сводки";
+}
+
+function isBotPaused(user) {
+  const timestamp = Date.parse(user?.botPausedUntil || "");
+  return Number.isFinite(timestamp) && timestamp > Date.now();
+}
+
+function botModeLabel(user) {
+  return isBotPaused(user) ? `ручной режим до ${humanDateTime(user.botPausedUntil)}` : "бот отвечает";
+}
+
+function clientPreviewText(user, text) {
+  const preview = text || "Нет текста";
+  return isBotPaused(user) ? `Ручной режим · ${preview}` : preview;
 }
 
 function splitLines(value) {

@@ -127,6 +127,10 @@ export type ClientSummary = {
   reminders: string[];
   riskLevel: ClientRiskLevel;
   nextAction?: string;
+  botPausedUntil?: string;
+  botPausedReason?: string;
+  botPausedBy?: "admin" | "manual";
+  lastAdminReplyAt?: string;
   agentProfile: ClientProfileData;
   manualProfile: ClientProfileData;
 };

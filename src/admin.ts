@@ -20,6 +20,7 @@ import { escapeTelegramHtml, getTelegramWebhookInfo, sendTelegramMessage, setTel
 import type { BotConfig, ClientSummary, Env, WorkSchedule } from "./types";
 
 const SESSION_COOKIE = "admin_session";
+const MANUAL_HANDOFF_MS = 24 * 60 * 60 * 1000;
 
 export async function handleAdminApi(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
@@ -44,6 +45,7 @@ export async function handleAdminApi(request: Request, env: Env): Promise<Respon
   if (userRoute && request.method === "GET" && userRoute.action === "messages") return Response.json(await readTranscript(env, userRoute.chatId));
   if (userRoute && request.method === "PUT" && userRoute.action === "profile") return Response.json(await updateUserProfile(request, env, userRoute.chatId));
   if (userRoute && request.method === "POST" && userRoute.action === "reply") return sendAdminReply(request, env, userRoute.chatId);
+  if (userRoute && request.method === "POST" && userRoute.action === "bot-resume") return resumeBotForClient(env, userRoute.chatId);
 
   if (request.method === "GET" && url.pathname === "/api/calendar/schedule") return Response.json(await readSchedule(env));
   if (request.method === "PUT" && url.pathname === "/api/calendar/schedule") {
@@ -126,10 +128,10 @@ async function syncTelegramWebhook(request: Request, env: Env): Promise<Record<s
   };
 }
 
-function parseUserRoute(pathname: string): { chatId: string; action: "profile" | "messages" | "reply" } | null {
-  const match = pathname.match(/^\/api\/users\/([^/]+)(?:\/(messages|reply))?$/);
+function parseUserRoute(pathname: string): { chatId: string; action: "profile" | "messages" | "reply" | "bot-resume" } | null {
+  const match = pathname.match(/^\/api\/users\/([^/]+)(?:\/(messages|reply|bot\/resume))?$/);
   if (!match) return null;
-  const action = match[2] === "messages" || match[2] === "reply" ? match[2] : "profile";
+  const action = match[2] === "messages" || match[2] === "reply" ? match[2] : match[2] === "bot/resume" ? "bot-resume" : "profile";
   return { chatId: decodeURIComponent(match[1]), action };
 }
 
@@ -174,8 +176,39 @@ async function sendAdminReply(request: Request, env: Env, chatId: string): Promi
     method: "POST",
     body: JSON.stringify({ role: "assistant", text, createdAt })
   });
-  await upsertClient(env, { chatId, lastAssistantText: text, lastMessageAt: createdAt });
-  return Response.json({ ok: true, createdAt });
+  const botPausedUntil = new Date(Date.now() + MANUAL_HANDOFF_MS).toISOString();
+  const next = await upsertClient(env, {
+    chatId,
+    lastAssistantText: text,
+    lastMessageAt: createdAt,
+    lastAdminReplyAt: createdAt,
+    botPausedUntil,
+    botPausedBy: "admin",
+    botPausedReason: "manual_admin_reply"
+  });
+  await appendStoredJsonl(env, "logs/manual_handoff_events.jsonl", {
+    chatId,
+    action: "pause",
+    botPausedUntil,
+    createdAt
+  });
+  return Response.json({ ok: true, createdAt, botPausedUntil, client: { ...next, mergedProfile: mergedProfile(next) } });
+}
+
+async function resumeBotForClient(env: Env, chatId: string): Promise<Response> {
+  const createdAt = new Date().toISOString();
+  const next = await upsertClient(env, {
+    chatId,
+    botPausedUntil: undefined,
+    botPausedReason: undefined,
+    botPausedBy: undefined
+  });
+  await appendStoredJsonl(env, "logs/manual_handoff_events.jsonl", {
+    chatId,
+    action: "resume",
+    createdAt
+  });
+  return Response.json({ ok: true, createdAt, client: { ...next, mergedProfile: mergedProfile(next) } });
 }
 
 function normalizeSchedule(schedule: WorkSchedule, env: Env): WorkSchedule {
