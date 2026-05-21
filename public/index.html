@@ -4,18 +4,18 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>НейроПсихолог Telegram-бот</title>
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='10' fill='%23007c7a'/%3E%3Ctext x='32' y='43' font-size='34' text-anchor='middle' fill='white'%3E%CE%A8%3C/text%3E%3C/svg%3E" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='10' fill='%2300877f'/%3E%3Ctext x='32' y='43' font-size='34' text-anchor='middle' fill='white'%3E%CE%A8%3C/text%3E%3C/svg%3E" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <main class="login-screen" id="loginScreen">
       <section class="login-panel">
-        <div class="brand">
+        <div class="brand full">
           <span class="brand-mark">Ψ</span>
           <div><b>НейроПсихолог</b><small>панель управления Telegram-ботом</small></div>
         </div>
         <h1>Вход в кабинет</h1>
-        <p>Пароль открывает рабочий дашборд. Google-вход одновременно подключает календарь для записи клиентов.</p>
+        <p>Пароль открывает дашборд. Google-вход подключает календарь психолога для записи клиентов.</p>
         <form id="loginForm" class="login-form">
           <input class="visually-hidden" type="text" autocomplete="username" value="admin" aria-hidden="true" tabindex="-1" />
           <input id="adminPassword" type="password" autocomplete="current-password" placeholder="Пароль администратора" aria-label="Пароль администратора" />
@@ -26,20 +26,21 @@
       </section>
     </main>
 
-    <main class="app hidden" id="app">
-      <aside class="sidebar">
+    <main class="app hidden drawer-collapsed" id="app">
+      <div class="drawer-backdrop" id="drawerBackdrop"></div>
+      <aside class="sidebar" id="sidebar">
         <div class="brand">
           <span class="brand-mark">Ψ</span>
-          <div><b>НейроПсихолог</b><small>Telegram-бот</small></div>
+          <div class="brand-copy"><b>НейроПсихолог</b><small>Telegram-бот</small></div>
         </div>
         <nav aria-label="Разделы дашборда">
-          <button class="active" data-section="overview">Обзор</button>
-          <button data-section="clients">Клиенты</button>
-          <button data-section="calendar">Календарь</button>
-          <button data-section="prompts">Инструкции</button>
-          <button data-section="services">Услуги и цены</button>
-          <button data-section="google">Google</button>
-          <button data-section="security">Безопасность</button>
+          <button class="active" data-section="overview"><span>Обзор</span></button>
+          <button data-section="clients"><span>Клиенты</span></button>
+          <button data-section="calendar"><span>Календарь</span></button>
+          <button data-section="prompts"><span>Инструкции</span></button>
+          <button data-section="services"><span>Услуги</span></button>
+          <button data-section="google"><span>Google</span></button>
+          <button data-section="security"><span>Безопасность</span></button>
         </nav>
         <section class="status">
           <b id="sidebarStatus">Бот активен</b>
@@ -50,35 +51,37 @@
 
       <section class="workspace">
         <header class="topbar">
-          <div>
+          <button id="drawerToggle" class="icon-button" aria-label="Открыть меню">☰</button>
+          <div class="topbar-title">
             <h1 id="sectionTitle">Обзор</h1>
-            <p id="sectionSubtitle">Состояние бота, запись, клиенты и быстрые действия психолога.</p>
+            <p id="sectionSubtitle">Рабочая очередь, ближайшие записи и состояние бота.</p>
           </div>
           <div class="actions">
+            <button id="themeToggle" class="icon-button" aria-label="Переключить тему">◐</button>
             <button id="preview">Предпросмотр</button>
             <button id="save">Сохранить</button>
           </div>
         </header>
 
         <section class="panel-stack" data-section-panel="overview">
-          <div class="metric-row">
-            <article class="metric"><span>Клиенты</span><b id="metricClients">0</b><small>диалоги в памяти</small></article>
-            <article class="metric"><span>Свободные окна</span><b id="metricSlots">0</b><small>из R2 и Google</small></article>
-            <article class="metric"><span>Внимание</span><b id="metricRisk">0</b><small>диалоги с риском</small></article>
+          <div class="metric-row compact">
+            <article class="metric"><span>Клиенты</span><b id="metricClients">0</b><small>активные диалоги</small></article>
+            <article class="metric"><span>Свободно</span><b id="metricAvailability">0</b><small>окна на 30 минут</small></article>
+            <article class="metric"><span>Напоминания</span><b id="metricReminders">0</b><small>ожидают отправки</small></article>
           </div>
           <article class="panel">
             <div class="panel-head">
-              <h2>Рабочая очередь</h2>
+              <div><h2>Рабочая очередь</h2><p>Клиенты с последними сообщениями, рисками и ближайшим действием.</p></div>
               <button data-section-jump="clients">Открыть клиентов</button>
             </div>
             <div id="activityList" class="activity-list"></div>
           </article>
           <article class="panel">
             <div class="panel-head">
-              <h2>Ближайшие окна записи</h2>
+              <div><h2>Ближайшие свободные окна</h2><p>Рассчитаны из рабочих часов, бронирований и Google Calendar.</p></div>
               <button data-section-jump="calendar">Открыть календарь</button>
             </div>
-            <div id="overviewSlots" class="slot-list compact"></div>
+            <div id="overviewAvailability" class="slot-list compact"></div>
           </article>
         </section>
 
@@ -93,6 +96,7 @@
                 <div><h2 id="clientName">Клиент не выбран</h2><p id="clientMeta">Выберите диалог слева.</p></div>
                 <span id="clientRisk" class="risk none">нет риска</span>
               </div>
+              <div id="clientSummary" class="summary-strip"></div>
               <div id="messageHistory" class="message-history"></div>
               <form id="replyForm" class="reply-form">
                 <textarea id="replyText" rows="3" placeholder="Ответ психолога. Сообщение уйдет клиенту в Telegram."></textarea>
@@ -100,10 +104,15 @@
               </form>
             </section>
             <aside class="client-profile">
-              <h2>Карточка клиента</h2>
+              <h2>Профиль клиента</h2>
               <label>Теги<input id="clientTags" placeholder="запись, оплата, нейроотличность" /></label>
-              <label>Факты<textarea id="clientFacts" rows="5" placeholder="Каждый факт с новой строки"></textarea></label>
-              <label>Напоминания<textarea id="clientReminders" rows="4" placeholder="Таблетки, врач, оплата, подготовка"></textarea></label>
+              <label>Факты<textarea id="clientFacts" rows="4" placeholder="Факты, которые важны в работе"></textarea></label>
+              <label>Лекарства<textarea id="clientMedications" rows="3" placeholder="Только со слов клиента"></textarea></label>
+              <label>Врачи<textarea id="clientDoctors" rows="3" placeholder="Психиатр, невролог, врач"></textarea></label>
+              <label>Проблемы<textarea id="clientProblems" rows="3" placeholder="Запросы, сложности, триггеры"></textarea></label>
+              <label>Предпочтения<textarea id="clientPreferences" rows="3" placeholder="Формат общения, длительность, ограничения"></textarea></label>
+              <label>Заметки психолога<textarea id="clientNotes" rows="4" placeholder="Ручные заметки не перетираются агентом"></textarea></label>
+              <label>Обычная длительность, мин<input id="clientDuration" type="number" min="15" max="240" step="15" /></label>
               <label>Следующее действие<textarea id="clientNextAction" rows="3"></textarea></label>
               <label>Риск
                 <select id="clientRiskSelect">
@@ -112,7 +121,11 @@
                   <option value="urgent">срочно проверить</option>
                 </select>
               </label>
-              <button id="saveClientProfile">Сохранить карточку</button>
+              <div class="button-row">
+                <button id="saveClientProfile">Сохранить профиль</button>
+                <button id="addReminder" type="button">Добавить напоминание</button>
+              </div>
+              <div id="clientRemindersList" class="reminder-list"></div>
               <p id="clientSaveStatus" class="hint"></p>
             </aside>
           </div>
@@ -121,25 +134,37 @@
         <section class="panel-stack hidden-panel" data-section-panel="calendar">
           <article class="panel">
             <div class="panel-head">
-              <div><h2>Календарь записи</h2><p>Слоты выглядят как недельная сетка. Google-синхронизация обновляет свободные окна.</p></div>
-              <div class="panel-actions"><button id="addSlot">Добавить окно</button><button id="syncCalendarInline">Синхронизировать Google</button></div>
+              <div><h2>Рабочие часы</h2><p>Психолог задает готовность работать. Свободные окна считаются автоматически.</p></div>
+              <div class="panel-actions">
+                <button id="saveSchedule">Сохранить часы</button>
+                <button id="syncCalendarInline">Синхронизировать Google</button>
+              </div>
+            </div>
+            <div class="schedule-grid" id="weeklySchedule"></div>
+            <div class="override-row">
+              <label>Конкретная дата<input id="overrideDate" type="date" /></label>
+              <label>Часы в дату<input id="overrideWindows" placeholder="12:00-20:00 или пусто" /></label>
+              <label class="checkbox-line"><input id="overrideClosed" type="checkbox" /> выходной</label>
+              <button id="applyOverride">Применить дату</button>
+            </div>
+          </article>
+          <article class="panel calendar-panel">
+            <div class="panel-head">
+              <div><h2>Календарь записи</h2><p>Свободно, занято ботом и занято в Google.</p></div>
+              <div class="panel-actions">
+                <label class="inline-field">Длительность<input id="availabilityDuration" type="number" min="15" max="180" step="15" value="30" /></label>
+                <button id="refreshAvailability">Обновить</button>
+              </div>
             </div>
             <div class="calendar-layout">
               <div id="calendarBoard" class="calendar-board"></div>
               <aside class="slot-editor">
-                <h2>Редактор окна</h2>
-                <label>Начало<input id="slotStart" type="datetime-local" /></label>
-                <label>Конец<input id="slotEnd" type="datetime-local" /></label>
-                <label>Статус
-                  <select id="slotStatus">
-                    <option value="free">свободно</option>
-                    <option value="held">удержано</option>
-                    <option value="booked">занято</option>
-                  </select>
-                </label>
-                <label>Источник<input id="slotSource" disabled /></label>
-                <button id="applySlot">Применить к окну</button>
-                <p id="slotEditorStatus" class="hint">Выберите окно в календаре.</p>
+                <h2>Выбранное окно</h2>
+                <p id="slotEditorStatus" class="hint">Выберите свободное окно.</p>
+                <label>Клиент для ручной записи<input id="bookingClient" placeholder="chat_id или имя" /></label>
+                <button id="manualBook">Занять вручную</button>
+                <h2>Бронирования</h2>
+                <div id="bookingList" class="booking-list"></div>
               </aside>
             </div>
           </article>
@@ -149,14 +174,13 @@
           <article class="panel wide">
             <div class="panel-head"><h2>Системная инструкция</h2><button id="reset">Загрузить сохраненное</button></div>
             <textarea id="systemPrompt" rows="12"></textarea>
-            <p class="hint">Бот не ставит диагноз, не обещает лечение, не заменяет экстренную помощь.</p>
+            <p class="hint">Бот не ставит диагноз, не обещает лечение и не заменяет экстренную помощь.</p>
           </article>
           <article class="panel">
             <h2>Память и поиск</h2>
             <label class="toggle"><span>Краткосрочная память, дней</span><input id="shortTermDays" type="number" min="1" max="30" /></label>
             <label class="toggle"><span>Долгосрочный профиль клиента</span><input id="longTermProfileEnabled" type="checkbox" /></label>
             <label class="toggle"><span>Веб-поиск через AI</span><input id="searchEnabled" type="checkbox" /></label>
-            <p class="hint">OpenAI использует web_search_preview. OpenRouter использует server tool openrouter:web_search.</p>
           </article>
         </section>
 
@@ -177,21 +201,13 @@
             <div id="calendarStatus" class="calendar-status">Проверка статуса...</div>
             <div class="button-row">
               <a class="google-login small" id="connectGoogleLink" href="/api/auth/google">Подключить Google</a>
-              <button id="syncCalendar">Обновить свободные окна</button>
+              <button id="syncCalendar">Синхронизировать</button>
             </div>
-            <details class="setup-details">
-              <summary>Настройки Google Console</summary>
-              <ul>
-                <li>OAuth Client: Web application.</li>
-                <li>Redirect URI: https://xn--80a3aie.xn--p1ai/bot/api/auth/google/callback</li>
-                <li>Scope: https://www.googleapis.com/auth/calendar.events</li>
-              </ul>
-            </details>
           </article>
           <article class="panel">
-            <h2>Как используется календарь</h2>
-            <p>Бот читает занятые события, строит свободные окна и при бронировании создает событие-удержание в календаре психолога.</p>
-            <p>Клиент не видит технические slot_id. В Telegram клиент выбирает номер удобного окна.</p>
+            <h2>Как работает запись</h2>
+            <p>Google Calendar используется как источник занятости. Если событие уже есть в Google, бот не предложит это время клиенту.</p>
+            <p>При записи бот создает событие-удержание в календаре психолога.</p>
           </article>
         </section>
 
@@ -199,15 +215,14 @@
           <article class="panel wide">
             <h2>Кризисная инструкция</h2>
             <textarea id="crisisPrompt" rows="10"></textarea>
-            <p class="hint">Кризисные сообщения должны уходить к человеку-специалисту. Бот не заменяет экстренную службу.</p>
           </article>
           <article class="panel">
             <h2>Ограничения</h2>
             <ul class="plain-list">
-              <li>Доступ к клиентам закрыт cookie-сессией администратора.</li>
-              <li>Google OAuth разрешен только для GOOGLE_ADMIN_EMAIL.</li>
-              <li>История сообщений хранится в R2/DO и не имеет публичного маршрута.</li>
-              <li>Веб-поиск не должен превращаться в медицинскую диагностику.</li>
+              <li>Админ API закрыт cookie-сессией или bearer token.</li>
+              <li>Webhook Telegram принимает только запросы с secret header.</li>
+              <li>Ручные заметки психолога не перетираются агентом.</li>
+              <li>Медицинские сведения хранятся как слова клиента, не как диагноз.</li>
             </ul>
           </article>
         </section>

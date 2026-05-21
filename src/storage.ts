@@ -1,10 +1,39 @@
-import { DEFAULT_CONFIG, DEFAULT_SLOTS } from "./defaults";
+import { DEFAULT_CONFIG, DEFAULT_SCHEDULE } from "./defaults";
 import { appStateStub } from "./memory";
-import type { BotConfig, CalendarSlot, ClientSummary, Env, TranscriptMessage } from "./types";
+import type {
+  Booking,
+  BotConfig,
+  ClientProfileData,
+  ClientReminder,
+  ClientRiskLevel,
+  ClientSummary,
+  Env,
+  GoogleBusyEvent,
+  LegacyCalendarSlot,
+  TranscriptMessage,
+  WorkSchedule
+} from "./types";
 
 const CONFIG_KEY = "config/bot.json";
-const SLOTS_KEY = "calendar/slots.json";
+const LEGACY_SLOTS_KEY = "calendar/slots.json";
+const SCHEDULE_KEY = "calendar/work_schedule.json";
+const BOOKINGS_KEY = "calendar/bookings.json";
+const GOOGLE_BUSY_KEY = "calendar/google_busy.json";
 const USERS_KEY = "users/index.json";
+const REMINDERS_KEY = "reminders/index.json";
+
+export const EMPTY_PROFILE: ClientProfileData = {
+  facts: [],
+  medications: [],
+  doctors: [],
+  appointments: [],
+  problems: [],
+  preferences: [],
+  riskNotes: [],
+  reminders: [],
+  psychologistNotes: [],
+  sessionHistory: []
+};
 
 export async function readJson<T>(bucket: R2Bucket, key: string, fallback: T): Promise<T> {
   const object = await bucket.get(key);
@@ -26,30 +55,66 @@ export function writeConfig(env: Env, config: BotConfig): Promise<void> {
   return writeStoredJson(env, CONFIG_KEY, config);
 }
 
-export function readSlots(env: Env): Promise<CalendarSlot[]> {
-  return readStoredJson(env, SLOTS_KEY, DEFAULT_SLOTS);
+export async function readSchedule(env: Env): Promise<WorkSchedule> {
+  const schedule = await readStoredJson<WorkSchedule>(env, SCHEDULE_KEY, { ...DEFAULT_SCHEDULE, timezone: env.TIMEZONE || DEFAULT_SCHEDULE.timezone });
+  return {
+    ...DEFAULT_SCHEDULE,
+    ...schedule,
+    timezone: schedule.timezone || env.TIMEZONE || DEFAULT_SCHEDULE.timezone,
+    weeklyTemplate: { ...DEFAULT_SCHEDULE.weeklyTemplate, ...(schedule.weeklyTemplate ?? {}) },
+    dateOverrides: schedule.dateOverrides ?? {}
+  };
 }
 
-export function writeSlots(env: Env, slots: CalendarSlot[]): Promise<void> {
-  return writeStoredJson(env, SLOTS_KEY, slots);
+export function writeSchedule(env: Env, schedule: WorkSchedule): Promise<void> {
+  return writeStoredJson(env, SCHEDULE_KEY, schedule);
+}
+
+export async function readBookings(env: Env): Promise<Booking[]> {
+  const bookings = await readStoredJson<Booking[]>(env, BOOKINGS_KEY, []);
+  return bookings.sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt));
+}
+
+export function writeBookings(env: Env, bookings: Booking[]): Promise<void> {
+  return writeStoredJson(env, BOOKINGS_KEY, bookings);
+}
+
+export function readGoogleBusy(env: Env): Promise<GoogleBusyEvent[]> {
+  return readStoredJson(env, GOOGLE_BUSY_KEY, []);
+}
+
+export function writeGoogleBusy(env: Env, busy: GoogleBusyEvent[]): Promise<void> {
+  return writeStoredJson(env, GOOGLE_BUSY_KEY, busy);
+}
+
+export async function readLegacySlots(env: Env): Promise<LegacyCalendarSlot[]> {
+  return readStoredJson<LegacyCalendarSlot[]>(env, LEGACY_SLOTS_KEY, []);
 }
 
 export async function readUsers(env: Env): Promise<ClientSummary[]> {
   const users = await readStoredJson<ClientSummary[]>(env, USERS_KEY, []);
-  return users.sort((a, b) => Date.parse(b.lastMessageAt) - Date.parse(a.lastMessageAt));
+  return users.map(normalizeClient).sort((a, b) => Date.parse(b.lastMessageAt) - Date.parse(a.lastMessageAt));
 }
 
 export async function writeUsers(env: Env, users: ClientSummary[]): Promise<void> {
-  await writeStoredJson(env, USERS_KEY, users);
+  await writeStoredJson(env, USERS_KEY, users.map(normalizeClient));
 }
 
-export async function upsertClient(env: Env, patch: Partial<ClientSummary> & { chatId: string }): Promise<ClientSummary> {
+export async function upsertClient(
+  env: Env,
+  patch: Omit<Partial<ClientSummary>, "agentProfile" | "manualProfile"> & {
+    chatId: string;
+    agentProfile?: Partial<ClientProfileData>;
+    manualProfile?: Partial<ClientProfileData>;
+  }
+): Promise<ClientSummary> {
   const users = await readStoredJson<ClientSummary[]>(env, USERS_KEY, []);
-  const index = users.findIndex((user) => user.chatId === patch.chatId);
-  const current: ClientSummary =
+  const normalized = users.map(normalizeClient);
+  const index = normalized.findIndex((user) => user.chatId === patch.chatId);
+  const current =
     index >= 0
-      ? users[index]
-      : {
+      ? normalized[index]
+      : normalizeClient({
           chatId: patch.chatId,
           lastMessageAt: new Date().toISOString(),
           messageCount: 0,
@@ -57,19 +122,99 @@ export async function upsertClient(env: Env, patch: Partial<ClientSummary> & { c
           facts: [],
           reminders: [],
           riskLevel: "none"
-        };
-  const next: ClientSummary = {
+        });
+  const next: ClientSummary = normalizeClient({
     ...current,
     ...patch,
     tags: mergeUnique(current.tags, patch.tags),
     facts: mergeUnique(current.facts, patch.facts),
     reminders: mergeUnique(current.reminders, patch.reminders),
-    messageCount: patch.messageCount ?? current.messageCount
-  };
-  if (index >= 0) users[index] = next;
-  else users.push(next);
-  await writeStoredJson(env, USERS_KEY, users);
+    messageCount: patch.messageCount ?? current.messageCount,
+    riskLevel: mergeRisk(current.riskLevel, patch.riskLevel),
+    agentProfile: mergeProfile(current.agentProfile, patch.agentProfile),
+    manualProfile: mergeProfile(current.manualProfile, patch.manualProfile)
+  } as ClientSummary);
+  if (index >= 0) normalized[index] = next;
+  else normalized.push(next);
+  await writeStoredJson(env, USERS_KEY, normalized);
   return next;
+}
+
+export function normalizeClient(user: Partial<ClientSummary> & { chatId: string }): ClientSummary {
+  const agentProfile = normalizeProfile(user.agentProfile, {
+    facts: user.facts ?? [],
+    reminders: user.reminders ?? []
+  });
+  const manualProfile = normalizeProfile(user.manualProfile);
+  return {
+    chatId: user.chatId,
+    username: user.username,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    lastMessageAt: user.lastMessageAt ?? new Date().toISOString(),
+    lastUserText: user.lastUserText,
+    lastAssistantText: user.lastAssistantText,
+    messageCount: user.messageCount ?? 0,
+    tags: normalizeList(user.tags),
+    facts: mergeUnique(agentProfile.facts, manualProfile.facts),
+    reminders: mergeUnique(agentProfile.reminders, manualProfile.reminders),
+    riskLevel: user.riskLevel ?? "none",
+    nextAction: user.nextAction,
+    agentProfile,
+    manualProfile
+  };
+}
+
+export function normalizeProfile(profile?: Partial<ClientProfileData>, seeds?: Partial<ClientProfileData>): ClientProfileData {
+  return {
+    facts: normalizeList([...(seeds?.facts ?? []), ...(profile?.facts ?? [])]),
+    medications: normalizeList([...(seeds?.medications ?? []), ...(profile?.medications ?? [])]),
+    doctors: normalizeList([...(seeds?.doctors ?? []), ...(profile?.doctors ?? [])]),
+    appointments: normalizeList([...(seeds?.appointments ?? []), ...(profile?.appointments ?? [])]),
+    problems: normalizeList([...(seeds?.problems ?? []), ...(profile?.problems ?? [])]),
+    preferences: normalizeList([...(seeds?.preferences ?? []), ...(profile?.preferences ?? [])]),
+    riskNotes: normalizeList([...(seeds?.riskNotes ?? []), ...(profile?.riskNotes ?? [])]),
+    reminders: normalizeList([...(seeds?.reminders ?? []), ...(profile?.reminders ?? [])]),
+    psychologistNotes: normalizeList([...(seeds?.psychologistNotes ?? []), ...(profile?.psychologistNotes ?? [])]),
+    sessionHistory: [...(seeds?.sessionHistory ?? []), ...(profile?.sessionHistory ?? [])].slice(-40),
+    modalDurationMinutes: profile?.modalDurationMinutes ?? seeds?.modalDurationMinutes
+  };
+}
+
+export function mergeProfile(current?: Partial<ClientProfileData>, patch?: Partial<ClientProfileData>): ClientProfileData {
+  const base = normalizeProfile(current);
+  if (!patch) return base;
+  return {
+    facts: mergeUnique(base.facts, patch.facts),
+    medications: mergeUnique(base.medications, patch.medications),
+    doctors: mergeUnique(base.doctors, patch.doctors),
+    appointments: mergeUnique(base.appointments, patch.appointments),
+    problems: mergeUnique(base.problems, patch.problems),
+    preferences: mergeUnique(base.preferences, patch.preferences),
+    riskNotes: mergeUnique(base.riskNotes, patch.riskNotes),
+    reminders: mergeUnique(base.reminders, patch.reminders),
+    psychologistNotes: mergeUnique(base.psychologistNotes, patch.psychologistNotes),
+    sessionHistory: [...base.sessionHistory, ...(patch.sessionHistory ?? [])].slice(-40),
+    modalDurationMinutes: patch.modalDurationMinutes ?? base.modalDurationMinutes
+  };
+}
+
+export async function readReminders(env: Env): Promise<ClientReminder[]> {
+  const reminders = await readStoredJson<ClientReminder[]>(env, REMINDERS_KEY, []);
+  return reminders.sort((a, b) => Date.parse(a.dueAt) - Date.parse(b.dueAt));
+}
+
+export function writeReminders(env: Env, reminders: ClientReminder[]): Promise<void> {
+  return writeStoredJson(env, REMINDERS_KEY, reminders);
+}
+
+export async function upsertReminder(env: Env, reminder: ClientReminder): Promise<ClientReminder> {
+  const reminders = await readReminders(env);
+  const index = reminders.findIndex((item) => item.id === reminder.id);
+  if (index >= 0) reminders[index] = reminder;
+  else reminders.push(reminder);
+  await writeReminders(env, reminders);
+  return reminder;
 }
 
 export async function readTranscript(env: Env, chatId: string): Promise<TranscriptMessage[]> {
@@ -150,9 +295,20 @@ export async function writeStoredJson<T>(env: Env, key: string, value: T): Promi
   });
 }
 
+export function mergedProfile(user: ClientSummary): ClientProfileData {
+  return mergeProfile(user.agentProfile, user.manualProfile);
+}
+
+function normalizeList(values: string[] | undefined): string[] {
+  return [...new Set((values ?? []).map((value) => value.trim()).filter(Boolean))].slice(0, 60);
+}
+
 function mergeUnique(current: string[] | undefined, patch: string[] | undefined): string[] {
-  const values = [...(current ?? []), ...(patch ?? [])]
-    .map((value) => value.trim())
-    .filter(Boolean);
-  return [...new Set(values)].slice(0, 24);
+  return normalizeList([...(current ?? []), ...(patch ?? [])]);
+}
+
+function mergeRisk(current: ClientRiskLevel | undefined, next: ClientRiskLevel | undefined): ClientRiskLevel {
+  if (current === "urgent" || next === "urgent") return "urgent";
+  if (current === "watch" || next === "watch") return "watch";
+  return "none";
 }

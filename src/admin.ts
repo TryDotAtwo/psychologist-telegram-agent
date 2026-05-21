@@ -1,19 +1,23 @@
-import type { BotConfig, CalendarSlot, ClientSummary, Env } from "./types";
-import { calendarConnectionStatus, syncGoogleCalendarCache } from "./calendar";
+import { calendarConnectionStatus, createBooking, listAvailability, syncGoogleCalendarCache, visibleBusyRanges } from "./calendar";
 import { createGoogleAuthUrl, handleGoogleCallback } from "./google";
 import { memoryStub } from "./memory";
+import { cancelReminder, createReminder, sendReminderNow, updateReminder } from "./reminders";
 import {
   appendStoredJsonl,
+  mergedProfile,
+  normalizeProfile,
+  readBookings,
   readConfig,
-  readSlots,
+  readReminders,
+  readSchedule,
   readTranscript,
   readUsers,
   upsertClient,
   writeConfig,
-  writeSlots,
-  writeUsers
+  writeSchedule
 } from "./storage";
-import { sendTelegramMessage } from "./telegram";
+import { escapeTelegramHtml, sendTelegramMessage } from "./telegram";
+import type { BotConfig, ClientSummary, Env, WorkSchedule } from "./types";
 
 const SESSION_COOKIE = "admin_session";
 
@@ -32,25 +36,63 @@ export async function handleAdminApi(request: Request, env: Env): Promise<Respon
     await writeConfig(env, config);
     return Response.json({ ok: true });
   }
-  if (request.method === "GET" && url.pathname === "/api/users") return Response.json(await readUsers(env));
+  if (request.method === "GET" && url.pathname === "/api/users") {
+    const users = await readUsers(env);
+    return Response.json(users.map((user) => ({ ...user, mergedProfile: mergedProfile(user) })));
+  }
   const userRoute = parseUserRoute(url.pathname);
-  if (userRoute && request.method === "GET" && userRoute.action === "messages") {
-    return Response.json(await readTranscript(env, userRoute.chatId));
+  if (userRoute && request.method === "GET" && userRoute.action === "messages") return Response.json(await readTranscript(env, userRoute.chatId));
+  if (userRoute && request.method === "PUT" && userRoute.action === "profile") return Response.json(await updateUserProfile(request, env, userRoute.chatId));
+  if (userRoute && request.method === "POST" && userRoute.action === "reply") return sendAdminReply(request, env, userRoute.chatId);
+
+  if (request.method === "GET" && url.pathname === "/api/calendar/schedule") return Response.json(await readSchedule(env));
+  if (request.method === "PUT" && url.pathname === "/api/calendar/schedule") {
+    const schedule = normalizeSchedule((await request.json()) as WorkSchedule, env);
+    await writeSchedule(env, schedule);
+    return Response.json(schedule);
   }
-  if (userRoute && request.method === "PUT" && userRoute.action === "profile") {
-    return Response.json(await updateUserProfile(request, env, userRoute.chatId));
+  if (request.method === "GET" && url.pathname === "/api/calendar/availability") {
+    const from = url.searchParams.get("from") ?? new Date().toISOString();
+    const to = url.searchParams.get("to") ?? new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
+    const durationMinutes = Number(url.searchParams.get("durationMinutes") ?? "30");
+    const [availability, busy] = await Promise.all([listAvailability(env, from, to, durationMinutes, 240), visibleBusyRanges(env, from, to)]);
+    return Response.json({ availability, busy });
   }
-  if (userRoute && request.method === "POST" && userRoute.action === "reply") {
-    return sendAdminReply(request, env, userRoute.chatId);
-  }
-  if (request.method === "GET" && url.pathname === "/api/slots") return Response.json(await readSlots(env));
-  if (request.method === "PUT" && url.pathname === "/api/slots") {
-    const slots = (await request.json()) as CalendarSlot[];
-    await writeSlots(env, slots);
-    return Response.json({ ok: true });
+  if (request.method === "GET" && url.pathname === "/api/calendar/bookings") return Response.json(await readBookings(env));
+  if (request.method === "POST" && url.pathname === "/api/calendar/bookings") {
+    const body = (await request.json()) as { availabilityId?: string; chatId?: string; clientName?: string; durationMinutes?: number };
+    if (!body.availabilityId || !body.durationMinutes) return Response.json({ error: "missing_booking_fields" }, { status: 400 });
+    const booking = await createBooking(env, {
+      availabilityId: body.availabilityId,
+      chatId: body.chatId,
+      clientName: body.clientName,
+      durationMinutes: body.durationMinutes,
+      source: "admin",
+      status: "booked"
+    });
+    if (!booking) return Response.json({ error: "availability_not_found_or_busy" }, { status: 409 });
+    return Response.json(booking);
   }
   if (request.method === "POST" && url.pathname === "/api/calendar/sync") return Response.json(await syncGoogleCalendarCache(env));
   if (request.method === "GET" && url.pathname === "/api/calendar/status") return Response.json(await calendarConnectionStatus(env));
+
+  if (request.method === "GET" && url.pathname === "/api/reminders") {
+    const chatId = url.searchParams.get("chatId");
+    const reminders = await readReminders(env);
+    return Response.json(chatId ? reminders.filter((reminder) => reminder.chatId === chatId) : reminders);
+  }
+  if (request.method === "POST" && url.pathname === "/api/reminders") {
+    const body = (await request.json()) as { chatId?: string; text?: string; dueAt?: string; timezone?: string };
+    if (!body.chatId || !body.text || !body.dueAt) return Response.json({ error: "missing_reminder_fields" }, { status: 400 });
+    const reminder = await createReminder(env, { chatId: body.chatId, text: body.text, dueAt: body.dueAt, timezone: body.timezone, source: "admin" });
+    if (!reminder) return Response.json({ error: "invalid_reminder" }, { status: 400 });
+    return Response.json(reminder);
+  }
+  const reminderRoute = parseReminderRoute(url.pathname);
+  if (reminderRoute && request.method === "PUT") return Response.json(await updateReminder(env, reminderRoute.id, await request.json()) ?? { error: "not_found" });
+  if (reminderRoute && request.method === "POST" && reminderRoute.action === "cancel") return Response.json(await cancelReminder(env, reminderRoute.id) ?? { error: "not_found" });
+  if (reminderRoute && request.method === "POST" && reminderRoute.action === "send-now") return Response.json(await sendReminderNow(env, reminderRoute.id) ?? { error: "not_found" });
+
   return Response.json({ error: "not_found" }, { status: 404 });
 }
 
@@ -61,38 +103,26 @@ function parseUserRoute(pathname: string): { chatId: string; action: "profile" |
   return { chatId: decodeURIComponent(match[1]), action };
 }
 
+function parseReminderRoute(pathname: string): { id: string; action?: "cancel" | "send-now" } | null {
+  const match = pathname.match(/^\/api\/reminders\/([^/]+)(?:\/(cancel|send-now))?$/);
+  if (!match) return null;
+  return { id: decodeURIComponent(match[1]), action: match[2] as "cancel" | "send-now" | undefined };
+}
+
 async function updateUserProfile(request: Request, env: Env, chatId: string): Promise<ClientSummary> {
   const body = (await request.json()) as Partial<ClientSummary>;
-  const users = await readUsers(env);
-  const index = users.findIndex((user) => user.chatId === chatId);
-  const current: ClientSummary =
-    index >= 0
-      ? users[index]
-      : {
-          chatId,
-          lastMessageAt: new Date().toISOString(),
-          messageCount: 0,
-          tags: [],
-          facts: [],
-          reminders: [],
-          riskLevel: "none"
-        };
-  const next: ClientSummary = {
-    ...current,
-    username: body.username ?? current.username,
-    firstName: body.firstName ?? current.firstName,
-    lastName: body.lastName ?? current.lastName,
-    tags: normalizeList(body.tags ?? current.tags),
-    facts: normalizeList(body.facts ?? current.facts),
-    reminders: normalizeList(body.reminders ?? current.reminders),
-    riskLevel: body.riskLevel ?? current.riskLevel,
-    nextAction: body.nextAction ?? current.nextAction,
-    lastMessageAt: current.lastMessageAt
-  };
-  if (index >= 0) users[index] = next;
-  else users.push(next);
-  await writeUsers(env, users);
-  return next;
+  const next = await upsertClient(env, {
+    chatId,
+    username: body.username,
+    firstName: body.firstName,
+    lastName: body.lastName,
+    tags: normalizeList(body.tags),
+    riskLevel: body.riskLevel,
+    nextAction: body.nextAction,
+    manualProfile: normalizeProfile(body.manualProfile)
+  });
+  await appendStoredJsonl(env, "logs/manual_profile_edits.jsonl", { chatId, editedAt: new Date().toISOString() });
+  return { ...next, facts: mergedProfile(next).facts, reminders: mergedProfile(next).reminders };
 }
 
 async function sendAdminReply(request: Request, env: Env, chatId: string): Promise<Response> {
@@ -118,21 +148,29 @@ async function sendAdminReply(request: Request, env: Env, chatId: string): Promi
   return Response.json({ ok: true, createdAt });
 }
 
-function normalizeList(values: string[] | undefined): string[] {
-  return [...new Set((values ?? []).map((value) => value.trim()).filter(Boolean))].slice(0, 50);
+function normalizeSchedule(schedule: WorkSchedule, env: Env): WorkSchedule {
+  return {
+    timezone: schedule.timezone || env.TIMEZONE || "Europe/Moscow",
+    slotStepMinutes: clampNumber(schedule.slotStepMinutes, 5, 120, 30),
+    introDurationMinutes: clampNumber(schedule.introDurationMinutes, 15, 180, 30),
+    defaultSessionMinutes: clampNumber(schedule.defaultSessionMinutes, 15, 240, 60),
+    weeklyTemplate: schedule.weeklyTemplate,
+    dateOverrides: schedule.dateOverrides ?? {}
+  };
 }
 
-function escapeTelegramHtml(value: string): string {
-  const map: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;" };
-  return value.replace(/[&<>]/g, (char) => map[char] ?? char);
+function clampNumber(value: number | undefined, min: number, max: number, fallback: number): number {
+  return Number.isFinite(value) ? Math.min(Math.max(Number(value), min), max) : fallback;
+}
+
+function normalizeList(values: string[] | undefined): string[] {
+  return [...new Set((values ?? []).map((value) => value.trim()).filter(Boolean))].slice(0, 60);
 }
 
 async function login(request: Request, env: Env): Promise<Response> {
   const body = (await request.json()) as { password?: string };
   const expectedPassword = env.ADMIN_PASSWORD || env.ADMIN_TOKEN;
-  if (!body.password || body.password !== expectedPassword) {
-    return Response.json({ error: "invalid_password" }, { status: 401 });
-  }
+  if (!body.password || body.password !== expectedPassword) return Response.json({ error: "invalid_password" }, { status: 401 });
   return Response.json(
     { ok: true },
     {

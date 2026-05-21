@@ -27,7 +27,61 @@ export type MemoryConfig = {
   maxRecentMessages: number;
 };
 
-export type CalendarSlot = {
+export type TimeWindow = {
+  start: string;
+  end: string;
+};
+
+export type WeekdayKey = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
+
+export type DateOverride = {
+  closed?: boolean;
+  windows?: TimeWindow[];
+  note?: string;
+};
+
+export type WorkSchedule = {
+  timezone: string;
+  slotStepMinutes: number;
+  introDurationMinutes: number;
+  defaultSessionMinutes: number;
+  weeklyTemplate: Record<WeekdayKey, TimeWindow[]>;
+  dateOverrides: Record<string, DateOverride>;
+};
+
+export type BookingStatus = "held" | "booked" | "cancelled";
+export type BookingSource = "bot" | "admin";
+
+export type Booking = {
+  id: string;
+  chatId?: string;
+  clientName?: string;
+  startsAt: string;
+  endsAt: string;
+  durationMinutes: number;
+  status: BookingStatus;
+  source: BookingSource;
+  googleEventId?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type GoogleBusyEvent = {
+  id?: string;
+  title?: string;
+  startsAt: string;
+  endsAt: string;
+};
+
+export type AvailabilityWindow = {
+  id: string;
+  startsAt: string;
+  endsAt: string;
+  durationMinutes: number;
+  source: "work_schedule";
+};
+
+export type LegacyCalendarSlot = {
   id: string;
   startsAt: string;
   endsAt: string;
@@ -37,6 +91,27 @@ export type CalendarSlot = {
 };
 
 export type ClientRiskLevel = "none" | "watch" | "urgent";
+
+export type SessionHistoryItem = {
+  startsAt: string;
+  durationMinutes: number;
+  serviceId?: string;
+  note?: string;
+};
+
+export type ClientProfileData = {
+  facts: string[];
+  medications: string[];
+  doctors: string[];
+  appointments: string[];
+  problems: string[];
+  preferences: string[];
+  riskNotes: string[];
+  reminders: string[];
+  psychologistNotes: string[];
+  sessionHistory: SessionHistoryItem[];
+  modalDurationMinutes?: number;
+};
 
 export type ClientSummary = {
   chatId: string;
@@ -52,6 +127,25 @@ export type ClientSummary = {
   reminders: string[];
   riskLevel: ClientRiskLevel;
   nextAction?: string;
+  agentProfile: ClientProfileData;
+  manualProfile: ClientProfileData;
+};
+
+export type ReminderStatus = "scheduled" | "sent" | "cancelled" | "failed";
+export type ReminderSource = "agent" | "admin";
+
+export type ClientReminder = {
+  id: string;
+  chatId: string;
+  text: string;
+  dueAt: string;
+  timezone: string;
+  status: ReminderStatus;
+  source: ReminderSource;
+  createdAt: string;
+  updatedAt: string;
+  sentAt?: string;
+  lastError?: string;
 };
 
 export type TranscriptMessage = {

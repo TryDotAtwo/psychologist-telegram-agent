@@ -1,4 +1,4 @@
-import type { CalendarSlot, Env } from "./types";
+import type { AvailabilityWindow, Env } from "./types";
 
 export async function sendTelegramMessage(env: Env, chatId: string, text: string): Promise<void> {
   const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
@@ -10,7 +10,7 @@ export async function sendTelegramMessage(env: Env, chatId: string, text: string
       parse_mode: "HTML",
       reply_markup: {
         keyboard: [
-          [{ text: "Записаться" }, { text: "Свободные слоты" }],
+          [{ text: "Записаться" }, { text: "Свободные окна" }],
           [{ text: "Цены" }, { text: "Задать вопрос" }]
         ],
         resize_keyboard: true
@@ -23,8 +23,10 @@ export async function sendTelegramMessage(env: Env, chatId: string, text: string
   }
 }
 
-export function formatSlots(slots: CalendarSlot[]): string {
-  if (slots.length === 0) return "Свободных слотов пока нет. Администратор добавит время в расписание.";
+export function formatAvailability(slots: AvailabilityWindow[], durationMinutes: number, returningClient: boolean): string {
+  if (slots.length === 0) {
+    return "Свободных окон пока нет. Психолог обновит рабочие часы или освободит время в календаре.";
+  }
   const lines = slots.map((slot, index) => {
     const start = new Date(slot.startsAt);
     const end = new Date(slot.endsAt);
@@ -46,7 +48,15 @@ export function formatSlots(slots: CalendarSlot[]): string {
     }).format(end);
     return `${index + 1}. ${capitalize(day)}, ${startTime}-${endTime}`;
   });
-  return `Ближайшие свободные окна:\n\n${lines.join("\n")}\n\nДля записи напишите: <b>бронь 1</b>, <b>бронь 2</b> или <b>бронь 3</b>.`;
+  const durationNote = returningClient
+    ? `Я подобрал окна на ${durationMinutes} минут по обычной длительности ваших встреч. Если нужна другая длительность, напишите: длительность 90.`
+    : `Для первой бесплатной встречи я показываю окна на ${durationMinutes} минут.`;
+  return `Ближайшие свободные окна:\n\n${lines.join("\n")}\n\n${durationNote}\n\nДля записи напишите: <b>бронь 1</b>, <b>бронь 2</b> или <b>бронь 3</b>.`;
+}
+
+export function escapeTelegramHtml(value: string): string {
+  const map: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;" };
+  return value.replace(/[&<>]/g, (char) => map[char] ?? char);
 }
 
 function capitalize(value: string): string {

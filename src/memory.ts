@@ -54,6 +54,26 @@ export class ChatMemory {
       await this.state.storage.put(key, `${current}${JSON.stringify(record)}\n`);
       return Response.json({ ok: true });
     }
+    if (request.method === "POST" && url.pathname === "/lock/acquire") {
+      const key = url.searchParams.get("key");
+      if (!key) return new Response("missing_key", { status: 400 });
+      const body = (await request.json()) as { lockId?: string; ttlMs?: number };
+      const lockId = body.lockId ?? crypto.randomUUID();
+      const ttlMs = Math.min(Math.max(body.ttlMs ?? 10_000, 1000), 30_000);
+      const now = Date.now();
+      const current = (await this.state.storage.get(`lock:${key}`)) as { lockId: string; expiresAt: number } | undefined;
+      if (current && current.expiresAt > now) return Response.json({ ok: false, lockId: current.lockId });
+      await this.state.storage.put(`lock:${key}`, { lockId, expiresAt: now + ttlMs });
+      return Response.json({ ok: true, lockId });
+    }
+    if (request.method === "POST" && url.pathname === "/lock/release") {
+      const key = url.searchParams.get("key");
+      if (!key) return new Response("missing_key", { status: 400 });
+      const body = (await request.json()) as { lockId?: string };
+      const current = (await this.state.storage.get(`lock:${key}`)) as { lockId: string; expiresAt: number } | undefined;
+      if (!current || current.lockId === body.lockId) await this.state.storage.delete(`lock:${key}`);
+      return Response.json({ ok: true });
+    }
     return new Response("not_found", { status: 404 });
   }
 

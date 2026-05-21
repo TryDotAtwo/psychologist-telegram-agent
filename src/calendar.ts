@@ -1,31 +1,100 @@
 import { getGoogleAccessToken, googleOAuthConfigured, readGoogleTokens } from "./google";
-import { readSlots, writeSlots } from "./storage";
-import type { CalendarSlot, Env } from "./types";
+import { buildAvailability } from "./calendar_core";
+import type { BusyRange } from "./calendar_core";
+import { appStateStub } from "./memory";
+import {
+  appendStoredJsonl,
+  readBookings,
+  readGoogleBusy,
+  readSchedule,
+  readUsers,
+  writeBookings,
+  writeGoogleBusy
+} from "./storage";
+import type { AvailabilityWindow, Booking, ClientSummary, Env, GoogleBusyEvent } from "./types";
 
-export async function listFreeSlots(env: Env, limit = 3): Promise<CalendarSlot[]> {
-  const slots = await readSlots(env);
-  return slots
-    .filter((slot) => slot.status === "free" && Date.parse(slot.startsAt) > Date.now())
-    .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt))
-    .slice(0, limit);
+export async function listFreeSlots(env: Env, limit = 3, durationMinutes?: number, chatId?: string): Promise<AvailabilityWindow[]> {
+  const duration = durationMinutes ?? (chatId ? await suggestedDurationForChat(env, chatId) : 30);
+  const from = new Date();
+  const to = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+  return listAvailability(env, from.toISOString(), to.toISOString(), duration, limit);
 }
 
-export async function holdSlot(env: Env, slotId: string, chatId: string): Promise<CalendarSlot | null> {
-  const slots = await readSlots(env);
-  const index = slots.findIndex((slot) => slot.id === slotId && slot.status === "free");
-  if (index < 0) return null;
-  const held = { ...slots[index], status: "held" as const, clientChatId: chatId };
-  slots[index] = held;
-  await writeSlots(env, slots);
-  await createGoogleCalendarHold(env, held, chatId);
-  return held;
+export async function listAvailability(
+  env: Env,
+  fromIso: string,
+  toIso: string,
+  durationMinutes: number,
+  limit = 80
+): Promise<AvailabilityWindow[]> {
+  const [schedule, bookings, googleBusy] = await Promise.all([readSchedule(env), readBookings(env), readGoogleBusy(env)]);
+  return buildAvailability(schedule, fromIso, toIso, durationMinutes, [
+    ...bookings
+      .filter((booking) => booking.status !== "cancelled")
+      .map((booking) => ({ startsAt: booking.startsAt, endsAt: booking.endsAt, source: "booking" as const, title: booking.clientName })),
+    ...googleBusy.map((busy) => ({ startsAt: busy.startsAt, endsAt: busy.endsAt, source: "google" as const, title: busy.title }))
+  ]).slice(0, limit);
 }
 
-export async function holdFreeSlotByPosition(env: Env, position: number, chatId: string): Promise<CalendarSlot | null> {
-  const freeSlots = await listFreeSlots(env, Math.max(position, 3));
+export async function holdFreeSlotByPosition(env: Env, position: number, chatId: string): Promise<Booking | null> {
+  const durationMinutes = await suggestedDurationForChat(env, chatId);
+  const freeSlots = await listFreeSlots(env, Math.max(position, 6), durationMinutes, chatId);
   const slot = freeSlots[position - 1];
   if (!slot) return null;
-  return holdSlot(env, slot.id, chatId);
+  return createBooking(env, { availabilityId: slot.id, chatId, durationMinutes, source: "bot", status: "held" });
+}
+
+export async function holdSlot(env: Env, slotId: string, chatId: string): Promise<Booking | null> {
+  const durationMinutes = await suggestedDurationForChat(env, chatId);
+  return createBooking(env, { availabilityId: slotId, chatId, durationMinutes, source: "bot", status: "held" });
+}
+
+export async function createBooking(
+  env: Env,
+  input: {
+    availabilityId: string;
+    chatId?: string;
+    clientName?: string;
+    durationMinutes: number;
+    source: "bot" | "admin";
+    status?: "held" | "booked";
+  }
+): Promise<Booking | null> {
+  const lock = await acquireBookingLock(env);
+  if (!lock.ok) {
+    await appendStoredJsonl(env, "logs/booking_conflicts.jsonl", { input, reason: "lock_busy", createdAt: new Date().toISOString() });
+    return null;
+  }
+  try {
+    const from = new Date();
+    const to = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+    const availability = await listAvailability(env, from.toISOString(), to.toISOString(), input.durationMinutes, 200);
+    const window = availability.find((item) => item.id === input.availabilityId);
+    if (!window) {
+      await appendStoredJsonl(env, "logs/booking_conflicts.jsonl", { input, reason: "availability_missing", createdAt: new Date().toISOString() });
+      return null;
+    }
+    const now = new Date().toISOString();
+    const booking: Booking = {
+      id: `booking_${crypto.randomUUID()}`,
+      chatId: input.chatId,
+      clientName: input.clientName,
+      startsAt: window.startsAt,
+      endsAt: window.endsAt,
+      durationMinutes: input.durationMinutes,
+      status: input.status ?? "held",
+      source: input.source,
+      createdAt: now,
+      updatedAt: now
+    };
+    booking.googleEventId = await createGoogleCalendarHold(env, booking);
+    const bookings = await readBookings(env);
+    bookings.push(booking);
+    await writeBookings(env, bookings);
+    return booking;
+  } finally {
+    await releaseBookingLock(env, lock.lockId);
+  }
 }
 
 export async function calendarConnectionStatus(env: Env): Promise<{ configured: boolean; connected: boolean; email?: string; missing: string[] }> {
@@ -42,13 +111,13 @@ export async function calendarConnectionStatus(env: Env): Promise<{ configured: 
   };
 }
 
-export async function syncGoogleCalendarCache(env: Env): Promise<{ ok: boolean; reason?: string; slotsWritten?: number }> {
+export async function syncGoogleCalendarCache(env: Env): Promise<{ ok: boolean; reason?: string; busyWritten?: number; availabilityWritten?: number }> {
   if (!googleOAuthConfigured(env)) return { ok: false, reason: "google_oauth_secrets_missing" };
   const accessToken = await getGoogleAccessToken(env);
   if (!accessToken) return { ok: false, reason: "google_not_connected" };
   const calendarId = env.GOOGLE_CALENDAR_ID || "primary";
   const timeMin = new Date();
-  const timeMax = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+  const timeMax = new Date(Date.now() + 28 * 24 * 60 * 60 * 1000);
   const params = new URLSearchParams({
     timeMin: timeMin.toISOString(),
     timeMax: timeMax.toISOString(),
@@ -60,58 +129,94 @@ export async function syncGoogleCalendarCache(env: Env): Promise<{ ok: boolean; 
     headers: { Authorization: `Bearer ${accessToken}` }
   });
   if (!response.ok) return { ok: false, reason: `google_events_status_${response.status}` };
-  const data = (await response.json()) as { items?: { start?: { dateTime?: string; date?: string }; end?: { dateTime?: string; date?: string } }[] };
-  const busy = (data.items ?? [])
-    .map((event) => ({ start: event.start?.dateTime ?? event.start?.date, end: event.end?.dateTime ?? event.end?.date }))
-    .filter((event): event is { start: string; end: string } => Boolean(event.start && event.end));
-  const generated = generateSlots(timeMin, timeMax, busy);
-  const current = await readSlots(env);
-  const manualHeldOrBooked = current.filter((slot) => slot.source === "manual" || slot.status !== "free");
-  await writeSlots(env, [...manualHeldOrBooked, ...generated]);
-  return { ok: true, slotsWritten: generated.length };
+  const data = (await response.json()) as {
+    items?: { id?: string; summary?: string; start?: { dateTime?: string; date?: string }; end?: { dateTime?: string; date?: string } }[];
+  };
+  const busy: GoogleBusyEvent[] = (data.items ?? [])
+    .map((event) => ({
+      id: event.id,
+      title: event.summary,
+      startsAt: event.start?.dateTime ?? event.start?.date ?? "",
+      endsAt: event.end?.dateTime ?? event.end?.date ?? ""
+    }))
+    .filter((event) => Boolean(event.startsAt && event.endsAt));
+  await writeGoogleBusy(env, busy);
+  const availability = await listAvailability(env, timeMin.toISOString(), timeMax.toISOString(), 30, 200);
+  return { ok: true, busyWritten: busy.length, availabilityWritten: availability.length };
 }
 
-function generateSlots(timeMin: Date, timeMax: Date, busy: { start: string; end: string }[]): CalendarSlot[] {
-  const result: CalendarSlot[] = [];
-  const busyRanges = busy.map((item) => ({ start: Date.parse(item.start), end: Date.parse(item.end) }));
-  for (let cursor = startOfNextHour(timeMin); cursor < timeMax && result.length < 30; cursor = new Date(cursor.getTime() + 60 * 60 * 1000)) {
-    const day = cursor.getDay();
-    const hour = cursor.getHours();
-    if (day === 0 || day === 6 || hour < 10 || hour >= 19) continue;
-    const end = new Date(cursor.getTime() + 60 * 60 * 1000);
-    const overlaps = busyRanges.some((range) => cursor.getTime() < range.end && end.getTime() > range.start);
-    if (!overlaps) {
-      result.push({
-        id: `gcal_${cursor.toISOString().replace(/[-:.]/g, "")}`,
-        startsAt: cursor.toISOString(),
-        endsAt: end.toISOString(),
-        status: "free",
-        source: "google_calendar_cache"
-      });
-    }
-  }
-  return result;
+export async function suggestedDurationForChat(env: Env, chatId: string): Promise<number> {
+  const schedule = await readSchedule(env);
+  const client = (await readUsers(env)).find((user) => user.chatId === chatId);
+  if (!client || client.messageCount <= 1) return schedule.introDurationMinutes || 30;
+  const durations = [
+    ...(client.agentProfile?.sessionHistory ?? []).map((item) => item.durationMinutes),
+    ...(client.manualProfile?.sessionHistory ?? []).map((item) => item.durationMinutes)
+  ].filter((value) => Number.isFinite(value) && value > 0);
+  if (!durations.length) return client.manualProfile?.modalDurationMinutes ?? client.agentProfile?.modalDurationMinutes ?? (schedule.defaultSessionMinutes || 60);
+  const counts = new Map<number, number>();
+  for (const duration of durations) counts.set(duration, (counts.get(duration) ?? 0) + 1);
+  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0]?.[0] ?? schedule.defaultSessionMinutes ?? 60;
 }
 
-function startOfNextHour(date: Date): Date {
-  const next = new Date(date);
-  next.setMinutes(0, 0, 0);
-  if (next <= date) next.setHours(next.getHours() + 1);
-  return next;
+export async function visibleBusyRanges(env: Env, fromIso: string, toIso: string): Promise<BusyRange[]> {
+  const [bookings, googleBusy] = await Promise.all([readBookings(env), readGoogleBusy(env)]);
+  const from = Date.parse(fromIso);
+  const to = Date.parse(toIso);
+  return [
+    ...bookings
+      .filter((booking) => booking.status !== "cancelled")
+      .map((booking) => ({ startsAt: booking.startsAt, endsAt: booking.endsAt, source: "booking" as const, title: booking.clientName ?? booking.chatId })),
+    ...googleBusy.map((busy) => ({ startsAt: busy.startsAt, endsAt: busy.endsAt, source: "google" as const, title: busy.title }))
+  ].filter((item) => Date.parse(item.startsAt) < to && Date.parse(item.endsAt) > from);
 }
 
-async function createGoogleCalendarHold(env: Env, slot: CalendarSlot, chatId: string): Promise<void> {
+export function clientDisplayName(client?: ClientSummary): string | undefined {
+  if (!client) return undefined;
+  return [client.firstName, client.lastName].filter(Boolean).join(" ") || client.username || client.chatId;
+}
+
+async function createGoogleCalendarHold(env: Env, booking: Booking): Promise<string | undefined> {
   const accessToken = await getGoogleAccessToken(env);
-  if (!accessToken) return;
+  if (!accessToken) return undefined;
   const calendarId = encodeURIComponent(env.GOOGLE_CALENDAR_ID || "primary");
-  await fetch(`https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events`, {
+  const response = await fetch(`https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events`, {
     method: "POST",
     headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       summary: "Предварительная запись из Telegram-бота",
-      description: `Telegram chat_id=${chatId}; slot_id=${slot.id}; статус=held`,
-      start: { dateTime: slot.startsAt, timeZone: env.TIMEZONE || "Europe/Moscow" },
-      end: { dateTime: slot.endsAt, timeZone: env.TIMEZONE || "Europe/Moscow" }
+      description: `Telegram chat_id=${booking.chatId ?? "admin"}; booking_id=${booking.id}; статус=${booking.status}`,
+      start: { dateTime: booking.startsAt, timeZone: env.TIMEZONE || "Europe/Moscow" },
+      end: { dateTime: booking.endsAt, timeZone: env.TIMEZONE || "Europe/Moscow" }
     })
+  });
+  if (!response.ok) {
+    await appendStoredJsonl(env, "logs/google_event_errors.jsonl", {
+      bookingId: booking.id,
+      status: response.status,
+      body: (await response.text()).slice(0, 500),
+      createdAt: new Date().toISOString()
+    });
+    return undefined;
+  }
+  const data = (await response.json()) as { id?: string };
+  return data.id;
+}
+
+async function acquireBookingLock(env: Env): Promise<{ ok: boolean; lockId: string }> {
+  const lockId = crypto.randomUUID();
+  const response = await appStateStub(env).fetch("https://app-state/lock/acquire?key=booking", {
+    method: "POST",
+    body: JSON.stringify({ lockId, ttlMs: 10_000 })
+  });
+  if (!response.ok) return { ok: false, lockId };
+  const data = (await response.json()) as { ok: boolean };
+  return { ok: data.ok, lockId };
+}
+
+async function releaseBookingLock(env: Env, lockId: string): Promise<void> {
+  await appStateStub(env).fetch("https://app-state/lock/release?key=booking", {
+    method: "POST",
+    body: JSON.stringify({ lockId })
   });
 }

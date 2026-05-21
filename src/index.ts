@@ -1,10 +1,11 @@
 import { handleAdminApi } from "./admin";
-import { holdFreeSlotByPosition, holdSlot, listFreeSlots } from "./calendar";
+import { clientDisplayName, holdFreeSlotByPosition, holdSlot, listFreeSlots, suggestedDurationForChat } from "./calendar";
 import { ChatMemory, memoryStub } from "./memory";
-import { answerWithOpenAI } from "./openai";
-import { appendStoredJsonl, readConfig, readUsers, upsertClient } from "./storage";
-import { formatSlots, sendTelegramMessage } from "./telegram";
-import type { Env, TelegramUpdate } from "./types";
+import { answerWithOpenAI, extractClientProfilePatch } from "./openai";
+import { createReminder, processDueReminders } from "./reminders";
+import { appendStoredJsonl, mergedProfile, readConfig, readUsers, upsertClient } from "./storage";
+import { formatAvailability, sendTelegramMessage } from "./telegram";
+import type { ClientRiskLevel, ClientSummary, Env, TelegramUpdate } from "./types";
 
 export { ChatMemory };
 
@@ -23,6 +24,10 @@ export default {
     if (url.pathname === "/telegram/webhook") return handleTelegramWebhook(request, env, ctx);
     if (url.pathname === "/bot" || url.pathname.startsWith("/bot/")) return fetchDashboardAsset(request, env);
     return env.ASSETS.fetch(request);
+  },
+
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(processDueReminders(env));
   }
 };
 
@@ -50,46 +55,59 @@ async function handleText(update: TelegramUpdate, env: Env): Promise<void> {
   const memory = memoryStub(env, chatId);
   const receivedAt = new Date().toISOString();
   const existingClient = (await readUsers(env)).find((client) => client.chatId === chatId);
-  const clientSignals = analyzeClientMessage(text);
-  await upsertClient(env, {
+
+  const baseClient = await upsertClient(env, {
     chatId,
     username: message.chat.username,
     firstName: message.chat.first_name,
     lastName: message.chat.last_name,
     lastMessageAt: receivedAt,
     lastUserText: text,
-    messageCount: (existingClient?.messageCount ?? 0) + 1,
-    tags: clientSignals.tags,
-    facts: clientSignals.facts,
-    reminders: clientSignals.reminders,
-    riskLevel: mergeRisk(existingClient?.riskLevel, clientSignals.riskLevel),
-    nextAction: clientSignals.nextAction ?? existingClient?.nextAction
+    messageCount: (existingClient?.messageCount ?? 0) + 1
   });
+
   await memory.fetch("https://memory/turn", {
     method: "POST",
     body: JSON.stringify({ role: "user", text, createdAt: receivedAt })
   });
 
+  const context = await memory.fetch("https://memory/context").then((response) => response.json());
+  await extractAndStoreClientSignals(env, config, chatId, text, context as { profile: unknown; turns: { role: string; text: string; createdAt: string }[] });
+
   let answer: string;
   if (/^(\/start|старт)$/i.test(text)) {
-    answer = "Здравствуйте. Бот помогает с записью и первичной навигацией. Можно спросить про формат, цену, свободные окна или записаться.";
+    answer =
+      "Здравствуйте. Я помогу с записью, ценами и базовой навигацией по консультациям. Можно написать: свободные окна, цены, записаться или задать вопрос.";
   } else if (/^(цены|прайс)$/i.test(text)) {
     answer = config.prices.map((price) => `${price.serviceId}: ${price.amount} ${price.currency}; ${price.note}`).join("\n");
+  } else if (/^длительность\s+(\d{2,3})/i.test(text)) {
+    const minutes = Number(text.match(/^длительность\s+(\d{2,3})/i)?.[1]);
+    const client = await upsertClient(env, { chatId, manualProfile: { modalDurationMinutes: minutes } });
+    answer = await availabilityAnswer(env, client, minutes);
   } else if (/^(записаться|свободн|слот|окн)/i.test(text)) {
-    answer = formatSlots(await listFreeSlots(env));
+    const duration = await suggestedDurationForChat(env, chatId);
+    answer = await availabilityAnswer(env, baseClient, duration);
   } else if (/^бронь\s+/i.test(text)) {
     const rawSlotRef = text.replace(/^бронь\s+/i, "").trim();
     const numericPosition = Number.parseInt(rawSlotRef, 10);
-    const held = Number.isFinite(numericPosition)
-      ? await holdFreeSlotByPosition(env, numericPosition, chatId)
-      : await holdSlot(env, rawSlotRef, chatId);
-    answer = held ? formatHeldSlot(held) : "Окно не найдено или уже занято. Напишите: свободные слоты.";
+    const held = Number.isFinite(numericPosition) ? await holdFreeSlotByPosition(env, numericPosition, chatId) : await holdSlot(env, rawSlotRef, chatId);
+    if (held) {
+      await upsertClient(env, {
+        chatId,
+        agentProfile: {
+          sessionHistory: [{ startsAt: held.startsAt, durationMinutes: held.durationMinutes, serviceId: held.durationMinutes <= 30 ? "intro_30" : "consultation" }],
+          modalDurationMinutes: held.durationMinutes
+        }
+      });
+      answer = formatHeldBooking(held);
+    } else {
+      answer = "Окно уже занято или не найдено. Напишите «свободные окна», чтобы получить актуальный список.";
+    }
   } else {
-    const context = await memory.fetch("https://memory/context").then((response) => response.json());
     try {
       answer = await answerWithOpenAI(env, config, text, context as { profile: unknown; turns: { role: string; text: string; createdAt: string }[] });
     } catch (error) {
-      answer = `AI-ответ сейчас не работает. Ошибка зафиксирована. Можно написать "свободные слоты" или "цены".`;
+      answer = "AI-ответ сейчас не работает. Можно написать «свободные окна» или «цены», а психолог увидит сообщение в дашборде.";
       await appendStoredJsonl(env, "logs/ai_errors.jsonl", {
         chatId,
         message: error instanceof Error ? error.message : String(error),
@@ -102,12 +120,7 @@ async function handleText(update: TelegramUpdate, env: Env): Promise<void> {
     method: "POST",
     body: JSON.stringify({ role: "assistant", text: answer, createdAt: new Date().toISOString() })
   });
-  await upsertClient(env, {
-    chatId,
-    lastMessageAt: new Date().toISOString(),
-    lastAssistantText: answer,
-    riskLevel: mergeRisk(existingClient?.riskLevel, clientSignals.riskLevel)
-  });
+  await upsertClient(env, { chatId, lastMessageAt: new Date().toISOString(), lastAssistantText: answer });
   await appendStoredJsonl(env, `transcripts/${chatId}.jsonl`, {
     user: text,
     assistant: answer,
@@ -116,57 +129,52 @@ async function handleText(update: TelegramUpdate, env: Env): Promise<void> {
   await sendTelegramMessage(env, chatId, answer);
 }
 
-function analyzeClientMessage(text: string): {
-  tags: string[];
-  facts: string[];
-  reminders: string[];
-  riskLevel: "none" | "watch" | "urgent";
-  nextAction?: string;
-} {
-  const normalized = text.toLowerCase();
-  const tags: string[] = [];
-  const facts: string[] = [];
-  const reminders: string[] = [];
-  let riskLevel: "none" | "watch" | "urgent" = "none";
-  let nextAction: string | undefined;
-
-  if (/запис|слот|окн|консультац|встреч/.test(normalized)) {
-    tags.push("запись");
-    nextAction = "Проверить потребность в записи и подтвердить время.";
+async function extractAndStoreClientSignals(
+  env: Env,
+  config: Awaited<ReturnType<typeof readConfig>>,
+  chatId: string,
+  text: string,
+  context: { profile: unknown; turns: { role: string; text: string; createdAt: string }[] }
+): Promise<void> {
+  try {
+    const extraction = await extractClientProfilePatch(env, config, text, context);
+    if (!extraction) return;
+    await upsertClient(env, {
+      chatId,
+      tags: extraction.tags,
+      agentProfile: extraction.profile,
+      riskLevel: mergeRisk(undefined, extraction.riskLevel),
+      nextAction: extraction.nextAction
+    });
+    for (const reminder of extraction.reminders ?? []) {
+      await createReminder(env, { chatId, text: reminder.text, dueAt: reminder.dueAt, timezone: reminder.timezone, source: "agent" });
+    }
+  } catch (error) {
+    await appendStoredJsonl(env, "logs/profile_extract_errors.jsonl", {
+      chatId,
+      text: text.slice(0, 500),
+      message: error instanceof Error ? error.message : String(error),
+      createdAt: new Date().toISOString()
+    });
   }
-  if (/цен|стоим|оплат|чек|ссылк/.test(normalized)) {
-    tags.push("оплата");
-    nextAction = "Проверить оплату, ссылку и чек после записи.";
-  }
-  if (/таблет|лекарств|медикамент|психиатр|врач|прием/.test(normalized)) {
-    tags.push("медицина");
-    reminders.push("Уточнить безопасный формат напоминаний: препарат/время/согласие клиента.");
-  }
-  if (/рас|аутиз|сдвг|нейро/.test(normalized)) tags.push("нейроотличность");
-  if (/тревог|паник|выгор|депресс|сон|сенсор/.test(normalized)) tags.push("самочувствие");
-  if (/самоуб|суицид|умереть|убить себя|навредить себе|не хочу жить/.test(normalized)) {
-    riskLevel = "urgent";
-    tags.push("кризис");
-    nextAction = "Срочно вручную проверить диалог и при необходимости дать кризисные контакты.";
-  } else if (/плохо|срыв|кризис|истерик|опасн/.test(normalized)) {
-    riskLevel = "watch";
-    tags.push("наблюдение");
-  }
-  const rememberMatch = normalized.match(/(?:запомни|важно|факт)[:\s]+(.{8,180})/);
-  if (rememberMatch?.[1]) facts.push(rememberMatch[1].trim());
-  const nameMatch = text.match(/меня зовут\s+([A-Za-zА-Яа-яЁё -]{2,40})/i);
-  if (nameMatch?.[1]) facts.push(`Имя: ${nameMatch[1].trim()}`);
-  return { tags, facts, reminders, riskLevel, nextAction };
 }
 
-function mergeRisk(current: "none" | "watch" | "urgent" | undefined, next: "none" | "watch" | "urgent"): "none" | "watch" | "urgent" {
+async function availabilityAnswer(env: Env, client: ClientSummary, durationMinutes: number): Promise<string> {
+  const slots = await listFreeSlots(env, 5, durationMinutes, client.chatId);
+  const profile = mergedProfile(client);
+  const returningClient = client.messageCount > 1 || profile.sessionHistory.length > 0;
+  return formatAvailability(slots, durationMinutes, returningClient);
+}
+
+function mergeRisk(current: ClientRiskLevel | undefined, next: ClientRiskLevel | undefined): ClientRiskLevel {
   if (current === "urgent" || next === "urgent") return "urgent";
   if (current === "watch" || next === "watch") return "watch";
   return "none";
 }
 
-function formatHeldSlot(slot: { startsAt: string; endsAt: string }): string {
-  const start = new Date(slot.startsAt);
+function formatHeldBooking(booking: { startsAt: string; endsAt: string }): string {
+  const start = new Date(booking.startsAt);
+  const end = new Date(booking.endsAt);
   const day = new Intl.DateTimeFormat("ru-RU", {
     weekday: "long",
     day: "numeric",
@@ -178,5 +186,10 @@ function formatHeldSlot(slot: { startsAt: string; endsAt: string }): string {
     minute: "2-digit",
     timeZone: "Europe/Moscow"
   }).format(start);
-  return `Готово. Окно временно удержано: ${day}, ${time}. Администратор подтвердит запись.`;
+  const endTime = new Intl.DateTimeFormat("ru-RU", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Europe/Moscow"
+  }).format(end);
+  return `Готово. Окно временно удержано: ${day}, ${time}-${endTime}. Психолог подтвердит запись.`;
 }
