@@ -88,9 +88,9 @@ export async function handleAdminApi(request: Request, env: Env): Promise<Respon
     return Response.json(chatId ? reminders.filter((reminder) => reminder.chatId === chatId) : reminders);
   }
   if (request.method === "POST" && url.pathname === "/api/reminders") {
-    const body = (await request.json()) as { chatId?: string; text?: string; dueAt?: string; timezone?: string };
+    const body = (await request.json()) as { chatId?: string; text?: string; dueAt?: string; timezone?: string; repeat?: "none" | "daily" | "weekly" | "monthly" };
     if (!body.chatId || !body.text || !body.dueAt) return Response.json({ error: "missing_reminder_fields" }, { status: 400 });
-    const reminder = await createReminder(env, { chatId: body.chatId, text: body.text, dueAt: body.dueAt, timezone: body.timezone, source: "admin" });
+    const reminder = await createReminder(env, { chatId: body.chatId, text: body.text, dueAt: body.dueAt, timezone: body.timezone, repeat: body.repeat, source: "admin" });
     if (!reminder) return Response.json({ error: "invalid_reminder" }, { status: 400 });
     return Response.json(reminder);
   }

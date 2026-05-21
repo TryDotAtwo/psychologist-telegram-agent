@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>НейроПсихолог Telegram-бот</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='10' fill='%2300877f'/%3E%3Ctext x='32' y='43' font-size='34' text-anchor='middle' fill='white'%3E%CE%A8%3C/text%3E%3C/svg%3E" />
-    <link rel="stylesheet" href="./styles.css?v=20260521-6" />
+    <link rel="stylesheet" href="./styles.css?v=20260521-7" />
   </head>
   <body>
     <main class="login-screen" id="loginScreen">
@@ -146,8 +146,26 @@
               </label>
               <div class="button-row">
                 <button id="saveClientProfile">Сохранить профиль</button>
-                <button id="addReminder" type="button">Добавить напоминание</button>
               </div>
+              <section class="reminder-composer" aria-label="Новое напоминание">
+                <h3>Новое напоминание</h3>
+                <label>Текст для клиента<textarea id="reminderText" rows="3" placeholder="Например: завтра в 10:00 принять назначенное врачом лекарство"></textarea></label>
+                <div class="reminder-form-grid">
+                  <label>Когда отправить<input id="reminderDueAt" type="datetime-local" /></label>
+                  <label>Повтор
+                    <select id="reminderRepeat">
+                      <option value="none">Один раз</option>
+                      <option value="daily">Каждый день</option>
+                      <option value="weekly">Каждую неделю</option>
+                      <option value="monthly">Каждый месяц</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="button-row reminder-actions">
+                  <button id="addReminder" type="button">Создать напоминание</button>
+                  <p id="reminderStatus" class="hint"></p>
+                </div>
+              </section>
               <div id="clientRemindersList" class="reminder-list"></div>
               <p id="clientSaveStatus" class="hint"></p>
             </section>
@@ -253,6 +271,6 @@
         <p id="saveStatus" class="save-status">Данные не загружены.</p>
       </section>
     </main>
-    <script src="./app.js?v=20260521-6"></script>
+    <script src="./app.js?v=20260521-7"></script>
   </body>
 </html>

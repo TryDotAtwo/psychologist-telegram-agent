@@ -137,6 +137,7 @@ export type ClientSummary = {
 
 export type ReminderStatus = "scheduled" | "sent" | "cancelled" | "failed";
 export type ReminderSource = "agent" | "admin";
+export type ReminderRepeat = "none" | "daily" | "weekly" | "monthly";
 
 export type ClientReminder = {
   id: string;
@@ -146,6 +147,8 @@ export type ClientReminder = {
   timezone: string;
   status: ReminderStatus;
   source: ReminderSource;
+  repeat?: ReminderRepeat;
+  sentCount?: number;
   createdAt: string;
   updatedAt: string;
   sentAt?: string;

@@ -12,6 +12,7 @@ let messageRefreshTimer = null;
 let refreshInFlight = false;
 let lastRenderedChatId = null;
 let lastMessagesKey = "";
+let lastReminderComposerClientId = null;
 
 const loginScreen = document.getElementById("loginScreen");
 const app = document.getElementById("app");
@@ -202,6 +203,12 @@ function setupStaticHandlers() {
     renderDetailedProfile();
   };
   document.getElementById("replyForm").onsubmit = sendReply;
+  document.getElementById("replyText").addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+      event.preventDefault();
+      document.getElementById("replyForm").requestSubmit();
+    }
+  });
   document.getElementById("resumeBot").onclick = resumeBotForClient;
   document.getElementById("saveClientProfile").onclick = saveClientProfile;
   document.getElementById("addReminder").onclick = addManualReminder;
@@ -522,6 +529,7 @@ function renderDetailedProfile() {
     profileRisk.className = "risk none";
     clearProfileForm();
     document.getElementById("clientRemindersList").innerHTML = `<div class="empty-state">Напоминания появятся после выбора клиента.</div>`;
+    lastReminderComposerClientId = null;
     return;
   }
   const profile = mergedProfile(user);
@@ -540,6 +548,10 @@ function renderDetailedProfile() {
   document.getElementById("clientDuration").value = profile.modalDurationMinutes || "";
   document.getElementById("clientNextAction").value = user.nextAction || "";
   document.getElementById("clientRiskSelect").value = user.riskLevel || "none";
+  if (lastReminderComposerClientId !== user.chatId) {
+    clearReminderComposer();
+    lastReminderComposerClientId = user.chatId;
+  }
   renderClientReminders(user.chatId);
 }
 
@@ -569,6 +581,7 @@ function clearProfileForm() {
   });
   document.getElementById("clientRiskSelect").value = "none";
   document.getElementById("clientSaveStatus").textContent = "";
+  clearReminderComposer();
 }
 
 function summaryChips(profile, user) {
@@ -656,11 +669,18 @@ async function saveClientProfile() {
 }
 
 function renderClientReminders(chatId) {
-  const list = reminders.filter((reminder) => reminder.chatId === chatId).slice(0, 8);
+  const list = reminders
+    .filter((reminder) => reminder.chatId === chatId)
+    .sort((a, b) => reminderSortRank(a) - reminderSortRank(b) || Date.parse(a.dueAt) - Date.parse(b.dueAt))
+    .slice(0, 10);
   document.getElementById("clientRemindersList").innerHTML = list.length
     ? list.map((reminder) => `
-      <div class="reminder-item">
-        <span><b>${humanDateTime(reminder.dueAt)}</b><small>${escapeHtml(reminder.text)}</small></span>
+      <div class="reminder-item ${reminder.repeat && reminder.repeat !== "none" ? "recurring" : ""}">
+        <span>
+          <b>${humanDateTime(reminder.dueAt)}</b>
+          <small>${escapeHtml(reminder.text)}</small>
+          <em>${repeatLabel(reminder.repeat)} · ${reminderStatusLabel(reminder.status)}${reminder.sentCount ? ` · отправлено ${reminder.sentCount}` : ""}</em>
+        </span>
         <span class="button-row">
           <button data-reminder-send="${escapeAttr(reminder.id)}">Сейчас</button>
           <button data-reminder-cancel="${escapeAttr(reminder.id)}">Отмена</button>
@@ -675,13 +695,25 @@ function renderClientReminders(chatId) {
 async function addManualReminder() {
   const user = users.find((item) => item.chatId === selectedClientId);
   if (!user) return;
-  const text = prompt("Текст напоминания клиенту");
-  if (!text) return;
-  const dueAtRaw = prompt("Когда отправить? Формат: 2026-05-22 10:00");
-  if (!dueAtRaw) return;
-  const dueAt = new Date(dueAtRaw.replace(" ", "T") + ":00+03:00").toISOString();
-  await api("/api/reminders", { method: "POST", body: JSON.stringify({ chatId: user.chatId, text, dueAt }) });
+  const text = document.getElementById("reminderText").value.trim();
+  const dueAtRaw = document.getElementById("reminderDueAt").value;
+  const repeat = document.getElementById("reminderRepeat").value;
+  const status = document.getElementById("reminderStatus");
+  if (!text || !dueAtRaw) {
+    status.textContent = "Заполните текст и время отправки.";
+    return;
+  }
+  const dueAt = reminderInputToIso(dueAtRaw);
+  if (!dueAt) {
+    status.textContent = "Время напоминания не распознано.";
+    return;
+  }
+  await api("/api/reminders", { method: "POST", body: JSON.stringify({ chatId: user.chatId, text, dueAt, repeat }) });
   reminders = await api("/api/reminders");
+  document.getElementById("reminderText").value = "";
+  document.getElementById("reminderRepeat").value = "none";
+  document.getElementById("reminderDueAt").value = defaultReminderDateTime();
+  status.textContent = repeat === "none" ? "Одиночное напоминание создано." : "Регулярное напоминание создано.";
   renderClientReminders(user.chatId);
   renderClient();
   renderOverview();
@@ -780,6 +812,60 @@ function botModeLabel(user) {
 function clientPreviewText(user, text) {
   const preview = text || "Нет текста";
   return isBotPaused(user) ? `Ручной режим · ${preview}` : preview;
+}
+
+function clearReminderComposer() {
+  const text = document.getElementById("reminderText");
+  const dueAt = document.getElementById("reminderDueAt");
+  const repeat = document.getElementById("reminderRepeat");
+  const status = document.getElementById("reminderStatus");
+  if (text) text.value = "";
+  if (dueAt) dueAt.value = defaultReminderDateTime();
+  if (repeat) repeat.value = "none";
+  if (status) status.textContent = "";
+}
+
+function defaultReminderDateTime() {
+  const date = new Date(Date.now() + 60 * 60 * 1000);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Moscow",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).formatToParts(date);
+  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${value.year}-${value.month}-${value.day}T${value.hour}:${value.minute}`;
+}
+
+function reminderInputToIso(value) {
+  if (!value) return "";
+  const normalized = value.length === 16 ? `${value}:00+03:00` : `${value}+03:00`;
+  const timestamp = Date.parse(normalized);
+  return Number.isNaN(timestamp) ? "" : new Date(timestamp).toISOString();
+}
+
+function repeatLabel(value) {
+  if (value === "daily") return "каждый день";
+  if (value === "weekly") return "каждую неделю";
+  if (value === "monthly") return "каждый месяц";
+  return "один раз";
+}
+
+function reminderStatusLabel(value) {
+  if (value === "sent") return "отправлено";
+  if (value === "cancelled") return "отменено";
+  if (value === "failed") return "ошибка отправки";
+  return "ожидает";
+}
+
+function reminderSortRank(reminder) {
+  if (reminder.status === "scheduled") return 0;
+  if (reminder.status === "failed") return 1;
+  if (reminder.status === "sent") return 2;
+  return 3;
 }
 
 function splitLines(value) {
