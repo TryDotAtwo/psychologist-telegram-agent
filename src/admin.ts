@@ -16,7 +16,7 @@ import {
   writeConfig,
   writeSchedule
 } from "./storage";
-import { escapeTelegramHtml, sendTelegramMessage } from "./telegram";
+import { escapeTelegramHtml, getTelegramWebhookInfo, sendTelegramMessage, setTelegramWebhook } from "./telegram";
 import type { BotConfig, ClientSummary, Env, WorkSchedule } from "./types";
 
 const SESSION_COOKIE = "admin_session";
@@ -75,6 +75,8 @@ export async function handleAdminApi(request: Request, env: Env): Promise<Respon
   }
   if (request.method === "POST" && url.pathname === "/api/calendar/sync") return Response.json(await syncGoogleCalendarCache(env));
   if (request.method === "GET" && url.pathname === "/api/calendar/status") return Response.json(await calendarConnectionStatus(env));
+  if (request.method === "GET" && url.pathname === "/api/telegram/webhook/status") return Response.json(await telegramWebhookStatus(env));
+  if (request.method === "POST" && url.pathname === "/api/telegram/webhook/sync") return Response.json(await syncTelegramWebhook(request, env));
 
   if (request.method === "GET" && url.pathname === "/api/reminders") {
     const chatId = url.searchParams.get("chatId");
@@ -94,6 +96,30 @@ export async function handleAdminApi(request: Request, env: Env): Promise<Respon
   if (reminderRoute && request.method === "POST" && reminderRoute.action === "send-now") return Response.json(await sendReminderNow(env, reminderRoute.id) ?? { error: "not_found" });
 
   return Response.json({ error: "not_found" }, { status: 404 });
+}
+
+async function telegramWebhookStatus(env: Env): Promise<Record<string, unknown>> {
+  const info = await getTelegramWebhookInfo(env);
+  return {
+    ok: info.ok,
+    result: info.result,
+    description: info.description,
+    error_code: info.error_code
+  };
+}
+
+async function syncTelegramWebhook(request: Request, env: Env): Promise<Record<string, unknown>> {
+  const body = (await request.json().catch(() => ({}))) as { url?: string };
+  const fallbackUrl = `${new URL(request.url).origin}/telegram/webhook`;
+  const webhookUrl = typeof body.url === "string" && body.url.startsWith("https://") ? body.url : fallbackUrl;
+  const setResult = await setTelegramWebhook(env, webhookUrl);
+  const status = await getTelegramWebhookInfo(env);
+  return {
+    ok: setResult.ok && status.ok,
+    webhookUrl,
+    setResult,
+    status
+  };
 }
 
 function parseUserRoute(pathname: string): { chatId: string; action: "profile" | "messages" | "reply" } | null {

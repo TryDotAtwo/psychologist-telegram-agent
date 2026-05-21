@@ -1,5 +1,22 @@
 import type { AvailabilityWindow, Env } from "./types";
 
+type TelegramApiResponse<T> = {
+  ok: boolean;
+  result?: T;
+  description?: string;
+  error_code?: number;
+};
+
+export type TelegramWebhookInfo = {
+  url: string;
+  has_custom_certificate?: boolean;
+  pending_update_count?: number;
+  last_error_date?: number;
+  last_error_message?: string;
+  max_connections?: number;
+  allowed_updates?: string[];
+};
+
 export async function sendTelegramMessage(env: Env, chatId: string, text: string): Promise<void> {
   const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
     method: "POST",
@@ -21,6 +38,41 @@ export async function sendTelegramMessage(env: Env, chatId: string, text: string
     const body = await response.text();
     throw new Error(`telegram_send_status=${response.status}; body=${body.slice(0, 300)}`);
   }
+}
+
+export async function getTelegramWebhookInfo(env: Env): Promise<TelegramApiResponse<TelegramWebhookInfo>> {
+  const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/getWebhookInfo`);
+  const payload = (await response.json()) as TelegramApiResponse<TelegramWebhookInfo>;
+  if (!response.ok || !payload.ok) {
+    return {
+      ok: false,
+      error_code: payload.error_code ?? response.status,
+      description: payload.description ?? `telegram_getWebhookInfo_status=${response.status}`
+    };
+  }
+  return payload;
+}
+
+export async function setTelegramWebhook(env: Env, url: string): Promise<TelegramApiResponse<boolean>> {
+  const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/setWebhook`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      url,
+      secret_token: env.TELEGRAM_WEBHOOK_SECRET,
+      allowed_updates: ["message"],
+      drop_pending_updates: false
+    })
+  });
+  const payload = (await response.json()) as TelegramApiResponse<boolean>;
+  if (!response.ok || !payload.ok) {
+    return {
+      ok: false,
+      error_code: payload.error_code ?? response.status,
+      description: payload.description ?? `telegram_setWebhook_status=${response.status}`
+    };
+  }
+  return payload;
 }
 
 export function formatAvailability(slots: AvailabilityWindow[], durationMinutes: number, returningClient: boolean): string {

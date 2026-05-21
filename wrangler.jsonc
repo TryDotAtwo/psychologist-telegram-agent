@@ -21,6 +21,10 @@
     {
       "pattern": "xn--80a3aie.xn--p1ai/bot*",
       "zone_name": "xn--80a3aie.xn--p1ai"
+    },
+    {
+      "pattern": "xn--80a3aie.xn--p1ai/telegram/webhook*",
+      "zone_name": "xn--80a3aie.xn--p1ai"
     }
   ],
   "vars": {
