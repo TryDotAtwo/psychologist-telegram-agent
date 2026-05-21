@@ -25,7 +25,8 @@ const weekdays = [
 
 const sectionMeta = {
   overview: ["Обзор", "Рабочая очередь, ближайшие записи и состояние бота."],
-  clients: ["Клиенты", "История сообщений, профиль клиента, напоминания и ответы через Telegram."],
+  clients: ["Клиенты", "История сообщений, короткая консультационная сводка и ответы через Telegram."],
+  profiles: ["Профили", "Подробные карточки клиентов: факты, лекарства, врачи, проблемы, риски, заметки и напоминания."],
   calendar: ["Календарь", "Рабочие часы, свободные окна, занятость Google и бронирования."],
   prompts: ["Инструкции", "Промпт, память и режим веб-поиска."],
   services: ["Услуги", "Услуги, длительность, цены и примечания."],
@@ -91,8 +92,10 @@ function renderAll() {
   renderCalendarBoard();
   renderOverview();
   renderUsers();
+  renderProfiles();
   renderCalendarStatus();
   renderClient();
+  renderDetailedProfile();
 }
 
 function setupGoogleLinks() {
@@ -142,7 +145,17 @@ function setupStaticHandlers() {
     users = await api("/api/users");
     reminders = await api("/api/reminders");
     renderUsers();
+    renderProfiles();
     renderClient();
+    renderDetailedProfile();
+  };
+  document.getElementById("refreshProfiles").onclick = async () => {
+    users = await api("/api/users");
+    reminders = await api("/api/reminders");
+    renderUsers();
+    renderProfiles();
+    renderClient();
+    renderDetailedProfile();
   };
   document.getElementById("replyForm").onsubmit = sendReply;
   document.getElementById("saveClientProfile").onclick = saveClientProfile;
@@ -393,17 +406,31 @@ function renderUsers() {
       </button>
     `).join("")
     : `<div class="empty-state">Клиенты появятся после первых сообщений в Telegram.</div>`;
-  attachClientOpenHandlers(document.getElementById("clientList"));
+  attachClientOpenHandlers(document.getElementById("clientList"), "clients");
   if (!selectedClientId && users[0]) selectedClientId = users[0].chatId;
 }
 
-function attachClientOpenHandlers(root) {
+function renderProfiles() {
+  document.getElementById("profileList").innerHTML = users.length
+    ? users.map((user) => `
+      <button class="client-row ${user.chatId === selectedClientId ? "selected" : ""}" data-client-open="${escapeAttr(user.chatId)}">
+        <span><b>${escapeHtml(displayClientName(user))}</b><small>${escapeHtml(profileListHint(user))}</small></span>
+        <em class="risk ${user.riskLevel}">${riskLabel(user.riskLevel)}</em>
+      </button>
+    `).join("")
+    : `<div class="empty-state">Профили появятся после первых сообщений в Telegram.</div>`;
+  attachClientOpenHandlers(document.getElementById("profileList"), "profiles");
+}
+
+function attachClientOpenHandlers(root, targetSection = "clients") {
   root.querySelectorAll("[data-client-open]").forEach((button) => {
     button.addEventListener("click", () => {
       selectedClientId = button.dataset.clientOpen;
-      openSection("clients");
+      openSection(targetSection);
       renderUsers();
+      renderProfiles();
       renderClient();
+      renderDetailedProfile();
     });
   });
 }
@@ -412,7 +439,12 @@ async function renderClient() {
   const user = users.find((item) => item.chatId === selectedClientId);
   if (!user) {
     document.getElementById("clientName").textContent = "Клиент не выбран";
+    document.getElementById("clientMeta").textContent = "Выберите диалог слева.";
+    const risk = document.getElementById("clientRisk");
+    risk.textContent = "нет риска";
+    risk.className = "risk none";
     document.getElementById("clientSummary").innerHTML = "";
+    document.getElementById("consultBrief").innerHTML = `<div class="empty-state">Короткая сводка появится после выбора клиента.</div>`;
     document.getElementById("messageHistory").innerHTML = `<div class="empty-state">Выберите клиента слева.</div>`;
     return;
   }
@@ -423,6 +455,28 @@ async function renderClient() {
   risk.textContent = riskLabel(user.riskLevel);
   risk.className = `risk ${user.riskLevel}`;
   document.getElementById("clientSummary").innerHTML = summaryChips(profile, user);
+  renderConsultBrief(user, profile);
+  await renderMessages(user.chatId);
+}
+
+function renderDetailedProfile() {
+  const user = users.find((item) => item.chatId === selectedClientId);
+  if (!user) {
+    document.getElementById("profileClientName").textContent = "Профиль не выбран";
+    document.getElementById("profileClientMeta").textContent = "Выберите клиента слева.";
+    const profileRisk = document.getElementById("profileRiskBadge");
+    profileRisk.textContent = "нет риска";
+    profileRisk.className = "risk none";
+    clearProfileForm();
+    document.getElementById("clientRemindersList").innerHTML = `<div class="empty-state">Напоминания появятся после выбора клиента.</div>`;
+    return;
+  }
+  const profile = mergedProfile(user);
+  document.getElementById("profileClientName").textContent = displayClientName(user);
+  document.getElementById("profileClientMeta").textContent = `chat_id=${user.chatId}; сообщений=${user.messageCount}`;
+  const profileRisk = document.getElementById("profileRiskBadge");
+  profileRisk.textContent = riskLabel(user.riskLevel);
+  profileRisk.className = `risk ${user.riskLevel}`;
   document.getElementById("clientTags").value = (user.tags || []).join("\n");
   document.getElementById("clientFacts").value = profile.facts.join("\n");
   document.getElementById("clientMedications").value = profile.medications.join("\n");
@@ -434,7 +488,33 @@ async function renderClient() {
   document.getElementById("clientNextAction").value = user.nextAction || "";
   document.getElementById("clientRiskSelect").value = user.riskLevel || "none";
   renderClientReminders(user.chatId);
-  await renderMessages(user.chatId);
+}
+
+function renderConsultBrief(user, profile) {
+  const scheduled = reminders.filter((reminder) => reminder.chatId === user.chatId && reminder.status === "scheduled");
+  const blocks = [
+    ["Текущая проблема", first(profile.problems) || user.lastUserText || "нет данных", "primary"],
+    ["Важные факты", first(profile.facts) || "нет данных"],
+    ["Лекарства", first(profile.medications) || "нет данных"],
+    ["Врачи", first(profile.doctors) || "нет данных"],
+    ["Риск", riskLabel(user.riskLevel)],
+    ["Следующее действие", user.nextAction || "нет"],
+    ["Напоминание", scheduled[0] ? `${humanDateTime(scheduled[0].dueAt)} · ${scheduled[0].text}` : first(profile.reminders) || "нет"]
+  ];
+  document.getElementById("consultBrief").innerHTML = blocks.map(([label, value, tone]) => `
+    <article class="brief-card ${tone || ""}">
+      <b>${label}</b>
+      <p>${escapeHtml(value)}</p>
+    </article>
+  `).join("");
+}
+
+function clearProfileForm() {
+  ["clientTags", "clientFacts", "clientMedications", "clientDoctors", "clientProblems", "clientPreferences", "clientNotes", "clientDuration", "clientNextAction"].forEach((id) => {
+    document.getElementById(id).value = "";
+  });
+  document.getElementById("clientRiskSelect").value = "none";
+  document.getElementById("clientSaveStatus").textContent = "";
 }
 
 function summaryChips(profile, user) {
@@ -496,7 +576,9 @@ async function saveClientProfile() {
   users = users.map((item) => (item.chatId === updated.chatId ? updated : item));
   document.getElementById("clientSaveStatus").textContent = "Профиль сохранен.";
   renderUsers();
+  renderProfiles();
   renderClient();
+  renderDetailedProfile();
 }
 
 function renderClientReminders(chatId) {
@@ -527,6 +609,7 @@ async function addManualReminder() {
   await api("/api/reminders", { method: "POST", body: JSON.stringify({ chatId: user.chatId, text, dueAt }) });
   reminders = await api("/api/reminders");
   renderClientReminders(user.chatId);
+  renderClient();
   renderOverview();
 }
 
@@ -534,12 +617,14 @@ async function sendReminderNow(id) {
   await api(`/api/reminders/${encodeURIComponent(id)}/send-now`, { method: "POST", body: "{}" });
   reminders = await api("/api/reminders");
   renderClient();
+  renderDetailedProfile();
 }
 
 async function cancelReminder(id) {
   await api(`/api/reminders/${encodeURIComponent(id)}/cancel`, { method: "POST", body: "{}" });
   reminders = await api("/api/reminders");
   renderClient();
+  renderDetailedProfile();
   renderOverview();
 }
 
@@ -590,18 +675,23 @@ function mergedProfile(user) {
   const agent = user.agentProfile || {};
   const manual = user.manualProfile || {};
   return {
-    facts: unique([...(agent.facts || []), ...(manual.facts || [])]),
-    medications: unique([...(agent.medications || []), ...(manual.medications || [])]),
-    doctors: unique([...(agent.doctors || []), ...(manual.doctors || [])]),
-    appointments: unique([...(agent.appointments || []), ...(manual.appointments || [])]),
-    problems: unique([...(agent.problems || []), ...(manual.problems || [])]),
-    preferences: unique([...(agent.preferences || []), ...(manual.preferences || [])]),
-    riskNotes: unique([...(agent.riskNotes || []), ...(manual.riskNotes || [])]),
-    reminders: unique([...(agent.reminders || []), ...(manual.reminders || [])]),
-    psychologistNotes: unique([...(agent.psychologistNotes || []), ...(manual.psychologistNotes || [])]),
+    facts: unique([...(manual.facts || []), ...(agent.facts || [])]),
+    medications: unique([...(manual.medications || []), ...(agent.medications || [])]),
+    doctors: unique([...(manual.doctors || []), ...(agent.doctors || [])]),
+    appointments: unique([...(manual.appointments || []), ...(agent.appointments || [])]),
+    problems: unique([...(manual.problems || []), ...(agent.problems || [])]),
+    preferences: unique([...(manual.preferences || []), ...(agent.preferences || [])]),
+    riskNotes: unique([...(manual.riskNotes || []), ...(agent.riskNotes || [])]),
+    reminders: unique([...(manual.reminders || []), ...(agent.reminders || [])]),
+    psychologistNotes: unique([...(manual.psychologistNotes || []), ...(agent.psychologistNotes || [])]),
     sessionHistory: [...(agent.sessionHistory || []), ...(manual.sessionHistory || [])],
     modalDurationMinutes: manual.modalDurationMinutes || agent.modalDurationMinutes
   };
+}
+
+function profileListHint(user) {
+  const profile = mergedProfile(user);
+  return first(profile.problems) || first(profile.facts) || user.lastUserText || "нет краткой сводки";
 }
 
 function splitLines(value) {
