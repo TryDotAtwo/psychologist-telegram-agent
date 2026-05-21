@@ -1,11 +1,21 @@
 import { handleAdminApi } from "./admin";
-import { clientDisplayName, holdFreeSlotByPosition, holdSlot, listFreeSlots, suggestedDurationForChat } from "./calendar";
+import {
+  clientDisplayName,
+  holdFreeSlotByPosition,
+  holdSlot,
+  listAvailability,
+  listFreeSlots,
+  suggestedDurationForChat
+} from "./calendar";
 import { ChatMemory, memoryStub } from "./memory";
 import { answerWithOpenAI, extractClientProfilePatch } from "./openai";
 import { createReminder, processDueReminders } from "./reminders";
 import { appendStoredJsonl, mergedProfile, readConfig, readUsers, upsertClient } from "./storage";
 import { formatAvailability, sendTelegramMessage } from "./telegram";
-import type { ClientRiskLevel, ClientSummary, Env, TelegramUpdate } from "./types";
+import type { BotConfig, ClientRiskLevel, ClientSummary, Env, TelegramUpdate } from "./types";
+
+type ConversationContext = { profile: unknown; turns: { role: string; text: string; createdAt: string }[] };
+type DayRequest = { label: string; fromIso: string; toIso: string };
 
 export { ChatMemory };
 
@@ -42,11 +52,11 @@ async function handleTelegramWebhook(request: Request, env: Env, ctx: ExecutionC
     return new Response("unauthorized", { status: 401 });
   }
   const update = (await request.json()) as TelegramUpdate;
-  if (update.message?.text) ctx.waitUntil(handleText(update, env));
+  if (update.message?.text) ctx.waitUntil(handleText(update, env, ctx));
   return Response.json({ ok: true });
 }
 
-async function handleText(update: TelegramUpdate, env: Env): Promise<void> {
+async function handleText(update: TelegramUpdate, env: Env, ctx: ExecutionContext): Promise<void> {
   const message = update.message;
   if (!message?.text) return;
   const chatId = String(message.chat.id);
@@ -71,10 +81,11 @@ async function handleText(update: TelegramUpdate, env: Env): Promise<void> {
     body: JSON.stringify({ role: "user", text, createdAt: receivedAt })
   });
 
-  const context = await memory.fetch("https://memory/context").then((response) => response.json());
-  await extractAndStoreClientSignals(env, config, chatId, text, context as { profile: unknown; turns: { role: string; text: string; createdAt: string }[] });
+  const context = (await memory.fetch("https://memory/context").then((response) => response.json())) as ConversationContext;
+  ctx.waitUntil(extractAndStoreClientSignals(env, config, chatId, text, context));
 
   let answer: string;
+  const dayRequest = parseAvailabilityDayRequest(text, env.TIMEZONE || "Europe/Moscow");
   if (/^(\/start|старт)$/i.test(text)) {
     answer =
       "Здравствуйте. Я помогу с записью, ценами и базовой навигацией по консультациям. Можно написать: свободные окна, цены, записаться или задать вопрос.";
@@ -84,7 +95,10 @@ async function handleText(update: TelegramUpdate, env: Env): Promise<void> {
     const minutes = Number(text.match(/^длительность\s+(\d{2,3})/i)?.[1]);
     const client = await upsertClient(env, { chatId, manualProfile: { modalDurationMinutes: minutes } });
     answer = await availabilityAnswer(env, client, minutes);
-  } else if (/^(записаться|свободн|слот|окн)/i.test(text)) {
+  } else if (dayRequest && isAvailabilityRequest(text)) {
+    const duration = await suggestedDurationForChat(env, chatId);
+    answer = await availabilityAnswerForDay(env, baseClient, duration, dayRequest);
+  } else if (isAvailabilityRequest(text)) {
     const duration = await suggestedDurationForChat(env, chatId);
     answer = await availabilityAnswer(env, baseClient, duration);
   } else if (/^бронь\s+/i.test(text)) {
@@ -105,9 +119,9 @@ async function handleText(update: TelegramUpdate, env: Env): Promise<void> {
     }
   } else {
     try {
-      answer = await answerWithOpenAI(env, config, text, context as { profile: unknown; turns: { role: string; text: string; createdAt: string }[] });
+      answer = await answerWithOpenAI(env, config, text, context);
     } catch (error) {
-      answer = "AI-ответ сейчас не работает. Можно написать «свободные окна» или «цены», а психолог увидит сообщение в дашборде.";
+      answer = localAssistantFallback(config, text);
       await appendStoredJsonl(env, "logs/ai_errors.jsonl", {
         chatId,
         message: error instanceof Error ? error.message : String(error),
@@ -116,26 +130,21 @@ async function handleText(update: TelegramUpdate, env: Env): Promise<void> {
     }
   }
 
+  const answeredAt = new Date().toISOString();
   await memory.fetch("https://memory/turn", {
     method: "POST",
-    body: JSON.stringify({ role: "assistant", text: answer, createdAt: new Date().toISOString() })
+    body: JSON.stringify({ role: "assistant", text: answer, createdAt: answeredAt })
   });
-  await upsertClient(env, { chatId, lastMessageAt: new Date().toISOString(), lastAssistantText: answer });
+  await upsertClient(env, { chatId, lastMessageAt: answeredAt, lastAssistantText: answer });
   await appendStoredJsonl(env, `transcripts/${chatId}.jsonl`, {
     user: text,
     assistant: answer,
-    createdAt: new Date().toISOString()
+    createdAt: answeredAt
   });
   await sendTelegramMessage(env, chatId, answer);
 }
 
-async function extractAndStoreClientSignals(
-  env: Env,
-  config: Awaited<ReturnType<typeof readConfig>>,
-  chatId: string,
-  text: string,
-  context: { profile: unknown; turns: { role: string; text: string; createdAt: string }[] }
-): Promise<void> {
+async function extractAndStoreClientSignals(env: Env, config: BotConfig, chatId: string, text: string, context: ConversationContext): Promise<void> {
   try {
     const extraction = await extractClientProfilePatch(env, config, text, context);
     if (!extraction) return;
@@ -162,8 +171,76 @@ async function extractAndStoreClientSignals(
 async function availabilityAnswer(env: Env, client: ClientSummary, durationMinutes: number): Promise<string> {
   const slots = await listFreeSlots(env, 5, durationMinutes, client.chatId);
   const profile = mergedProfile(client);
-  const returningClient = client.messageCount > 1 || profile.sessionHistory.length > 0;
+  const returningClient = profile.sessionHistory.length > 0;
   return formatAvailability(slots, durationMinutes, returningClient);
+}
+
+async function availabilityAnswerForDay(env: Env, client: ClientSummary, durationMinutes: number, dayRequest: DayRequest): Promise<string> {
+  const slots = await listAvailability(env, dayRequest.fromIso, dayRequest.toIso, durationMinutes, 8);
+  const profile = mergedProfile(client);
+  const returningClient = profile.sessionHistory.length > 0;
+  if (!slots.length) {
+    return `На ${dayRequest.label} свободных окон пока нет. Можно написать «свободные окна», и я покажу ближайшие доступные варианты.`;
+  }
+  return formatAvailability(slots, durationMinutes, returningClient).replace("Ближайшие свободные окна:", `Свободные окна на ${dayRequest.label}:`);
+}
+
+function isAvailabilityRequest(text: string): boolean {
+  return /(запис|свободн|слот|окн|брон|когда|есть|можно|понед|вторн|сред|четвер|пятниц|суббот|воскрес|завтра|послезавтра)/i.test(text);
+}
+
+function parseAvailabilityDayRequest(text: string, timezone: string): DayRequest | null {
+  const normalized = text.toLowerCase();
+  const todayKey = localDateKey(new Date(), timezone);
+  if (/сегодня/.test(normalized)) return dayRequestFromDateKey(todayKey, "сегодня");
+  if (/завтра/.test(normalized) && !/послезавтра/.test(normalized)) return dayRequestFromDateKey(addDays(todayKey, 1), "завтра");
+  if (/послезавтра/.test(normalized)) return dayRequestFromDateKey(addDays(todayKey, 2), "послезавтра");
+
+  const weekdays = [
+    { index: 1, label: "понедельник", pattern: /понед|пн\b/ },
+    { index: 2, label: "вторник", pattern: /вторн|вт\b/ },
+    { index: 3, label: "среду", pattern: /сред|ср\b/ },
+    { index: 4, label: "четверг", pattern: /четвер|чт\b/ },
+    { index: 5, label: "пятницу", pattern: /пятниц|пт\b/ },
+    { index: 6, label: "субботу", pattern: /суббот|сб\b/ },
+    { index: 0, label: "воскресенье", pattern: /воскрес|вскр|вс\b/ }
+  ];
+  const match = weekdays.find((weekday) => weekday.pattern.test(normalized));
+  return match ? dayRequestFromDateKey(nextWeekdayDateKey(todayKey, match.index), match.label) : null;
+}
+
+function dayRequestFromDateKey(dateKey: string, label: string): DayRequest {
+  return {
+    label,
+    fromIso: `${dateKey}T00:00:00+03:00`,
+    toIso: `${addDays(dateKey, 1)}T00:00:00+03:00`
+  };
+}
+
+function nextWeekdayDateKey(todayKey: string, weekdayIndex: number): string {
+  const todayIndex = weekdayIndexForDateKey(todayKey);
+  const delta = (weekdayIndex - todayIndex + 7) % 7;
+  return addDays(todayKey, delta);
+}
+
+function weekdayIndexForDateKey(dateKey: string): number {
+  return new Date(`${dateKey}T12:00:00+03:00`).getUTCDay();
+}
+
+function localDateKey(date: Date, timezone: string): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
+}
+
+function addDays(dateKey: string, days: number): string {
+  const timestamp = Date.parse(`${dateKey}T12:00:00+03:00`) + days * 24 * 60 * 60 * 1000;
+  return localDateKey(new Date(timestamp), "Europe/Moscow");
+}
+
+function localAssistantFallback(config: BotConfig, text: string): string {
+  if (/цен|прайс|стоим|сколько/i.test(text)) {
+    return config.prices.map((price) => `${price.serviceId}: ${price.amount} ${price.currency}; ${price.note}`).join("\n");
+  }
+  return "Понял сообщение. Я передал его психологу в дашборд. Я уже могу помочь с записью: напишите «свободные окна», «на понедельник есть?» или «цены».";
 }
 
 function mergeRisk(current: ClientRiskLevel | undefined, next: ClientRiskLevel | undefined): ClientRiskLevel {

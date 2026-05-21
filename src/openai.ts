@@ -5,6 +5,9 @@ type ContextPayload = {
   turns: { role: string; text: string; createdAt: string }[];
 };
 
+const ANSWER_TIMEOUT_MS = 12_000;
+const EXTRACTION_TIMEOUT_MS = 6_000;
+
 export type ClientExtraction = {
   tags?: string[];
   profile?: Partial<ClientProfileData>;
@@ -14,11 +17,10 @@ export type ClientExtraction = {
 };
 
 export async function answerWithOpenAI(env: Env, config: BotConfig, userText: string, context: ContextPayload): Promise<string> {
-  if (!env.OPENAI_API_KEY && env.OPENROUTER_API_KEY) {
-    return answerWithOpenRouter(env, config, userText, context);
-  }
+  if (!env.OPENAI_API_KEY && env.OPENROUTER_API_KEY) return answerWithOpenRouter(env, config, userText, context);
   if (!env.OPENAI_API_KEY) throw new Error("missing_ai_provider_secret");
 
+  const tools = config.searchEnabled && shouldUseWebSearch(userText) ? [{ type: "web_search_preview" }] : [];
   const payload = {
     model: env.OPENAI_MODEL,
     input: [
@@ -34,7 +36,7 @@ export async function answerWithOpenAI(env: Env, config: BotConfig, userText: st
       },
       { role: "user", content: userText }
     ],
-    tools: config.searchEnabled ? [{ type: "web_search_preview" }] : [],
+    tools,
     temperature: 0.4
   };
 
@@ -44,7 +46,8 @@ export async function answerWithOpenAI(env: Env, config: BotConfig, userText: st
       Authorization: `Bearer ${env.OPENAI_API_KEY}`,
       "Content-Type": "application/json"
     },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(ANSWER_TIMEOUT_MS)
   });
   if (!response.ok) {
     const body = await response.text();
@@ -55,12 +58,7 @@ export async function answerWithOpenAI(env: Env, config: BotConfig, userText: st
   return data.output_text;
 }
 
-export async function extractClientProfilePatch(
-  env: Env,
-  config: BotConfig,
-  userText: string,
-  context: ContextPayload
-): Promise<ClientExtraction | null> {
+export async function extractClientProfilePatch(env: Env, config: BotConfig, userText: string, context: ContextPayload): Promise<ClientExtraction | null> {
   if (!env.OPENROUTER_API_KEY) return heuristicExtraction(userText, env.TIMEZONE || "Europe/Moscow");
   const payload = {
     model: env.OPENROUTER_MODEL ?? "openrouter/owl-alpha",
@@ -75,7 +73,7 @@ export async function extractClientProfilePatch(
           "manualProfile психолога нельзя менять: возвращай только agent profile patch.",
           `known_services=${JSON.stringify(config.services)}`,
           `context=${JSON.stringify(context)}`
-        ].join("\n"),
+        ].join("\n")
       },
       {
         role: "user",
@@ -86,25 +84,17 @@ export async function extractClientProfilePatch(
     ],
     temperature: 0.1
   };
-  const baseUrl = env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1";
-  const response = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": "https://xn--80a3aie.xn--p1ai/bot/",
-      "X-Title": "Psychologist Telegram Agent"
-    },
-    body: JSON.stringify(payload)
-  });
-  if (!response.ok) throw new Error(`openrouter_extract_status=${response.status}; body=${(await response.text()).slice(0, 500)}`);
-  const data = (await response.json()) as { choices?: { message?: { content?: string } }[] };
-  const content = data.choices?.[0]?.message?.content;
-  if (!content) throw new Error("openrouter_extract_empty_message_content");
-  return sanitizeExtraction(JSON.parse(stripJsonFences(content)) as ClientExtraction, env.TIMEZONE || "Europe/Moscow");
+
+  try {
+    const content = await completeOpenRouter(env, payload, EXTRACTION_TIMEOUT_MS);
+    return sanitizeExtraction(JSON.parse(stripJsonFences(content)) as ClientExtraction, env.TIMEZONE || "Europe/Moscow");
+  } catch {
+    return heuristicExtraction(userText, env.TIMEZONE || "Europe/Moscow");
+  }
 }
 
 async function answerWithOpenRouter(env: Env, config: BotConfig, userText: string, context: ContextPayload): Promise<string> {
+  const tools = config.searchEnabled && shouldUseWebSearch(userText) ? [{ type: "openrouter:web_search", parameters: { max_results: 3 } }] : undefined;
   const payload = {
     model: env.OPENROUTER_MODEL ?? "openrouter/owl-alpha",
     messages: [
@@ -116,15 +106,24 @@ async function answerWithOpenRouter(env: Env, config: BotConfig, userText: strin
           `services=${JSON.stringify(config.services)}`,
           `prices=${JSON.stringify(config.prices)}`,
           `memory_context=${JSON.stringify(context)}`,
-          "provider_note=OpenRouter fallback is active; use web search only when the user asks about current facts, external sources, or uncertain factual claims."
+          "Если вопрос про запись, цены или расписание, отвечай кратко и предложи использовать команды: свободные окна, цены."
         ].join("\n\n")
       },
       { role: "user", content: userText }
     ],
-    tools: config.searchEnabled ? [{ type: "openrouter:web_search", parameters: { max_results: 3 } }] : [],
+    tools,
     temperature: 0.4
   };
 
+  try {
+    return await completeOpenRouter(env, payload, ANSWER_TIMEOUT_MS);
+  } catch (error) {
+    if (!tools) throw error;
+    return completeOpenRouter(env, { ...payload, tools: undefined }, ANSWER_TIMEOUT_MS);
+  }
+}
+
+async function completeOpenRouter(env: Env, payload: unknown, timeoutMs: number): Promise<string> {
   const baseUrl = env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1";
   const response = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
     method: "POST",
@@ -134,7 +133,8 @@ async function answerWithOpenRouter(env: Env, config: BotConfig, userText: strin
       "HTTP-Referer": "https://xn--80a3aie.xn--p1ai/bot/",
       "X-Title": "Psychologist Telegram Agent"
     },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(timeoutMs)
   });
   if (!response.ok) {
     const body = await response.text();
@@ -144,6 +144,10 @@ async function answerWithOpenRouter(env: Env, config: BotConfig, userText: strin
   const text = data.choices?.[0]?.message?.content;
   if (!text) throw new Error("openrouter_empty_message_content");
   return text;
+}
+
+function shouldUseWebSearch(text: string): boolean {
+  return /(погугл|найди|поиск|источник|ссылка|новост|сейчас|актуальн|сегодня|курс|закон|исследован|статья|кто такой|что известно)/i.test(text);
 }
 
 function heuristicExtraction(text: string, timezone: string): ClientExtraction {

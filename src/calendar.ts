@@ -148,11 +148,14 @@ export async function syncGoogleCalendarCache(env: Env): Promise<{ ok: boolean; 
 export async function suggestedDurationForChat(env: Env, chatId: string): Promise<number> {
   const schedule = await readSchedule(env);
   const client = (await readUsers(env)).find((user) => user.chatId === chatId);
-  if (!client || client.messageCount <= 1) return schedule.introDurationMinutes || 30;
+  if (!client) return schedule.introDurationMinutes || 30;
   const durations = [
     ...(client.agentProfile?.sessionHistory ?? []).map((item) => item.durationMinutes),
     ...(client.manualProfile?.sessionHistory ?? []).map((item) => item.durationMinutes)
   ].filter((value) => Number.isFinite(value) && value > 0);
+  if (!durations.length && !client.manualProfile?.modalDurationMinutes && !client.agentProfile?.modalDurationMinutes) {
+    return schedule.introDurationMinutes || 30;
+  }
   if (!durations.length) return client.manualProfile?.modalDurationMinutes ?? client.agentProfile?.modalDurationMinutes ?? (schedule.defaultSessionMinutes || 60);
   const counts = new Map<number, number>();
   for (const duration of durations) counts.set(duration, (counts.get(duration) ?? 0) + 1);
