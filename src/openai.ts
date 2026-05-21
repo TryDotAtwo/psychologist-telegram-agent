@@ -26,7 +26,16 @@ type OpenRouterResponse = {
 
 const ANSWER_TIMEOUT_MS = 12_000;
 const EXTRACTION_TIMEOUT_MS = 6_000;
-const OPENROUTER_FALLBACK_MODEL = "openrouter/free";
+const OPENROUTER_DEFAULT_MODEL = "deepseek/deepseek-v4-flash:free";
+const OPENROUTER_FINAL_ROUTER = "openrouter/free";
+const OPENROUTER_FREE_FALLBACK_MODELS = [
+  "deepseek/deepseek-v4-flash:free",
+  "google/gemma-4-31b-it:free",
+  "nvidia/nemotron-3-super-120b-a12b:free",
+  "openai/gpt-oss-120b:free",
+  "z-ai/glm-4.5-air:free",
+  "qwen/qwen3-coder:free"
+];
 
 export type ClientExtraction = {
   tags?: string[];
@@ -144,14 +153,31 @@ async function answerWithOpenRouter(env: Env, config: BotConfig, userText: strin
 }
 
 function withOpenRouterFallbackModels(env: Env, payload: Omit<OpenRouterPayload, "model" | "models">): OpenRouterPayload {
-  const models = openRouterModelCandidates(env);
+  const models = openRouterModelCandidates(env, true);
   if (models.length === 1) return { ...payload, model: models[0] };
   return { ...payload, models };
 }
 
-function openRouterModelCandidates(env: Env): string[] {
-  const configured = env.OPENROUTER_MODEL?.trim() || "openrouter/owl-alpha";
-  return [...new Set([configured, OPENROUTER_FALLBACK_MODEL])];
+export function openRouterModelCandidates(env: Pick<Env, "OPENROUTER_MODEL">, rotateFallbacks = false): string[] {
+  const configured = env.OPENROUTER_MODEL?.trim() || OPENROUTER_DEFAULT_MODEL;
+  const fallbackModels = rotateFallbacks ? rotateModels(OPENROUTER_FREE_FALLBACK_MODELS) : OPENROUTER_FREE_FALLBACK_MODELS;
+  return [...new Set([configured, ...fallbackModels, OPENROUTER_FINAL_ROUTER])];
+}
+
+function rotateModels(models: string[]): string[] {
+  if (models.length < 2) return models;
+  const shift = randomIndex(models.length);
+  return [...models.slice(shift), ...models.slice(0, shift)];
+}
+
+function randomIndex(maxExclusive: number): number {
+  try {
+    const values = new Uint32Array(1);
+    crypto.getRandomValues(values);
+    return values[0] % maxExclusive;
+  } catch {
+    return Date.now() % maxExclusive;
+  }
 }
 
 async function completeOpenRouter(env: Env, payload: OpenRouterPayload, timeoutMs: number): Promise<string> {

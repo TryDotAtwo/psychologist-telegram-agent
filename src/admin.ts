@@ -1,7 +1,7 @@
 import { calendarConnectionStatus, createBooking, listAvailability, syncGoogleCalendarCache, visibleBusyRanges } from "./calendar";
 import { createGoogleAuthUrl, handleGoogleCallback } from "./google";
 import { memoryStub } from "./memory";
-import { answerWithOpenAI } from "./openai";
+import { answerWithOpenAI, openRouterModelCandidates } from "./openai";
 import { cancelReminder, createReminder, sendReminderNow, updateReminder } from "./reminders";
 import {
   appendStoredJsonl,
@@ -113,6 +113,7 @@ async function aiStatus(env: Env): Promise<Record<string, unknown>> {
       ok: true,
       provider: env.OPENAI_API_KEY ? "openai" : env.OPENROUTER_API_KEY ? "openrouter" : "none",
       model: env.OPENAI_API_KEY ? env.OPENAI_MODEL : env.OPENROUTER_MODEL,
+      fallbackModels: env.OPENROUTER_API_KEY ? openRouterModelCandidates(env) : [],
       latencyMs: Date.now() - startedAt,
       sample: answer.slice(0, 160)
     };
@@ -121,6 +122,7 @@ async function aiStatus(env: Env): Promise<Record<string, unknown>> {
       ok: false,
       provider: env.OPENAI_API_KEY ? "openai" : env.OPENROUTER_API_KEY ? "openrouter" : "none",
       model: env.OPENAI_API_KEY ? env.OPENAI_MODEL : env.OPENROUTER_MODEL,
+      fallbackModels: env.OPENROUTER_API_KEY ? openRouterModelCandidates(env) : [],
       latencyMs: Date.now() - startedAt,
       error: error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500)
     };
