@@ -102,7 +102,7 @@ async function executePendingAction(env: Env, chatId: string, action: PendingAct
 
 async function executeReminderAction(env: Env, chatId: string, action: PendingAction): Promise<ActionFlowResult> {
   const text = normalizeReminderText(stringField(action.fields.text) || "");
-  const medicationName = stringField(action.fields.medicationName) || extractMedicationName(text);
+  const medicationName = medicationField(action.fields.medicationName) || extractMedicationName(text);
   const repeat = repeatField(action.fields.repeat);
   const dueAt = normalizeDueAt(action.fields.dueAt, repeat);
   if (!text || !dueAt) {
@@ -265,7 +265,7 @@ function enrichReminderFields(env: Env, text: string, current: Record<string, un
   const dueAt = buildReminderDueAt(text, repeat || repeatField(fields.repeat), env.TIMEZONE || "Europe/Moscow");
   const reminderText = extractReminderText(text);
   const normalizedText = normalizeReminderText(stringField(fields.text) || reminderText || "");
-  const medicationName = stringField(fields.medicationName) || extractMedicationName(normalizedText) || extractMedicationName(text);
+  const medicationName = medicationField(fields.medicationName) || extractMedicationName(normalizedText) || extractMedicationName(text);
   if (normalizedText) fields.text = medicationName ? normalizeReminderText(replaceMedicationName(normalizedText, medicationName)) : normalizedText;
   if (medicationName) {
     fields.medicationName = medicationName;
@@ -398,6 +398,11 @@ function extractMedicationName(value: string): string | undefined {
     .replace(/\b(?:в|на|к|с|около)\s+\d{1,2}(?::\d{2})?\b.*$/iu, "")
     .replace(/[.,;:!?]+$/u, "")
     .trim();
+  return raw ? normalizeMedicationName(raw) : undefined;
+}
+
+function medicationField(value: unknown): string | undefined {
+  const raw = stringField(value);
   return raw ? normalizeMedicationName(raw) : undefined;
 }
 
@@ -536,7 +541,7 @@ function formatPendingAction(action: PendingAction): string {
   const lines = [`Понял задачу: ${safe(actionTitle(action.kind))}.`];
   if (action.kind === "reminder_create") {
     const reminderDueAt = normalizeDueAt(action.fields.dueAt, repeatField(action.fields.repeat)) || stringField(action.fields.dueAt) || "";
-    const medicationName = stringField(action.fields.medicationName);
+    const medicationName = medicationField(action.fields.medicationName);
     const reminderKind = stringField(action.fields.reminderKind);
     lines.push("", "Что будет сделано:");
     lines.push(`Тип: ${medicationName || reminderKind === "medication" ? "напоминание о препарате" : "обычное напоминание"}`);
