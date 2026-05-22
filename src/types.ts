@@ -113,6 +113,19 @@ export type ClientProfileData = {
   modalDurationMinutes?: number;
 };
 
+export type PendingActionKind = "reminder_create" | "booking_create" | "profile_update";
+
+export type PendingAction = {
+  id: string;
+  kind: PendingActionKind;
+  summary: string;
+  fields: Record<string, unknown>;
+  missingFields: string[];
+  originalText: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type ClientSummary = {
   chatId: string;
   username?: string;
@@ -135,6 +148,7 @@ export type ClientSummary = {
   lastProfiledMessageCount?: number;
   longTermMemoryUpdatedAt?: string;
   memorySummary?: string;
+  pendingAction?: PendingAction;
   agentProfile: ClientProfileData;
   manualProfile: ClientProfileData;
 };

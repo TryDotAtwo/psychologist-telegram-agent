@@ -168,6 +168,7 @@ export function normalizeClient(user: Partial<ClientSummary> & { chatId: string 
     lastProfiledMessageCount: typeof user.lastProfiledMessageCount === "number" ? user.lastProfiledMessageCount : undefined,
     longTermMemoryUpdatedAt: user.longTermMemoryUpdatedAt || undefined,
     memorySummary: user.memorySummary || undefined,
+    pendingAction: normalizePendingAction(user.pendingAction),
     agentProfile,
     manualProfile
   };
@@ -335,4 +336,19 @@ function mergeRisk(current: ClientRiskLevel | undefined, next: ClientRiskLevel |
   if (current === "urgent" || next === "urgent") return "urgent";
   if (current === "watch" || next === "watch") return "watch";
   return "none";
+}
+
+function normalizePendingAction(action: ClientSummary["pendingAction"]): ClientSummary["pendingAction"] {
+  if (!action) return undefined;
+  if (action.kind !== "reminder_create" && action.kind !== "booking_create" && action.kind !== "profile_update") return undefined;
+  return {
+    id: action.id || `pending_${crypto.randomUUID()}`,
+    kind: action.kind,
+    summary: action.summary || "",
+    fields: action.fields && typeof action.fields === "object" ? action.fields : {},
+    missingFields: normalizeList(action.missingFields),
+    originalText: action.originalText || "",
+    createdAt: action.createdAt || new Date().toISOString(),
+    updatedAt: action.updatedAt || new Date().toISOString()
+  };
 }

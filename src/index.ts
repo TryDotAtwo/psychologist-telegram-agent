@@ -1,4 +1,5 @@
 import { handleAdminApi } from "./admin";
+import { handleAgentActionFlow } from "./agent_actions";
 import {
   clientDisplayName,
   holdFreeSlotByPosition,
@@ -105,7 +106,13 @@ async function handleText(update: TelegramUpdate, env: Env, ctx: ExecutionContex
   }
 
   let answer: string;
-  const dayRequest = parseAvailabilityDayRequest(text, env.TIMEZONE || "Europe/Moscow");
+  let keyboard: string[][] | undefined;
+  const actionFlow = await handleAgentActionFlow(env, config, chatId, text, baseClient, context);
+  if (actionFlow?.handled) {
+    answer = actionFlow.answer;
+    keyboard = actionFlow.keyboard;
+  } else {
+    const dayRequest = parseAvailabilityDayRequest(text, env.TIMEZONE || "Europe/Moscow");
   if (/^(\/start|старт)$/i.test(text)) {
     answer =
       "Здравствуйте. Я помогу с записью, ценами и базовой навигацией по консультациям. Можно написать: свободные окна, цены, записаться или связаться с психологом.";
@@ -157,7 +164,7 @@ async function handleText(update: TelegramUpdate, env: Env, ctx: ExecutionContex
   } else {
     try {
       ctx.waitUntil(sendTelegramChatAction(env, chatId).catch(() => undefined));
-      answer = await answerWithOpenAI(env, config, text, context);
+      answer = cleanAssistantHtml(await answerWithOpenAI(env, config, text, context));
     } catch (error) {
       await appendStoredJsonl(env, "logs/ai_errors.jsonl", {
         chatId,
@@ -169,6 +176,7 @@ async function handleText(update: TelegramUpdate, env: Env, ctx: ExecutionContex
         chatId,
         nextAction: "Агент не ответил клиенту автоматически. Проверить последнее сообщение вручную."
       });
+    }
     }
   }
 
@@ -185,7 +193,7 @@ async function handleText(update: TelegramUpdate, env: Env, ctx: ExecutionContex
     source: "bot"
   });
   await appendClientMemoryMarkdown(env, chatId, { role: "assistant", text: answer, createdAt: answeredAt, source: "bot" });
-  await sendTelegramMessage(env, chatId, answer);
+  await sendTelegramMessage(env, chatId, answer, keyboard);
   const latestClient = (await readUsers(env)).find((client) => client.chatId === chatId) ?? baseClient;
   if (shouldRefreshClientMemoryProfile(latestClient)) {
     ctx.waitUntil(refreshClientMemoryProfile(env, config, chatId, "auto_50_messages").catch((error) => logProfileRefreshError(env, chatId, error)));
@@ -279,6 +287,15 @@ async function logProfileRefreshError(env: Env, chatId: string, error: unknown):
     message: error instanceof Error ? error.message : String(error),
     createdAt: new Date().toISOString()
   });
+}
+
+function cleanAssistantHtml(value: string): string {
+  const stripped = value
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/```[\s\S]*?```/g, (block) => block.replace(/```/g, ""))
+    .replace(/`([^`]+)`/g, "$1");
+  return stripped.replace(/[&<>]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[char] ?? char);
 }
 
 function formatHeldBooking(booking: { startsAt: string; endsAt: string }): string {

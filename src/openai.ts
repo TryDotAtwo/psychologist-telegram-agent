@@ -29,6 +29,8 @@ const ANSWER_TIMEOUT_MS = 28_000;
 const EXTRACTION_TIMEOUT_MS = 10_000;
 const ANSWER_MODEL_TIMEOUT_MS = 10_000;
 const EXTRACTION_MODEL_TIMEOUT_MS = 5_000;
+const ACTION_EXTRACTION_TIMEOUT_MS = 6_000;
+const ACTION_EXTRACTION_MODEL_TIMEOUT_MS = 3_500;
 const OPENROUTER_DEFAULT_MODEL = "deepseek/deepseek-v4-flash:free";
 const OPENROUTER_FINAL_ROUTER = "openrouter/free";
 const OPENROUTER_FREE_FALLBACK_MODELS = [
@@ -47,6 +49,70 @@ export type ClientExtraction = {
   nextAction?: string;
   reminders?: Omit<ClientReminder, "id" | "chatId" | "status" | "source" | "createdAt" | "updatedAt">[];
 };
+
+export type AgentActionPlan = {
+  kind: "none" | "reminder_create" | "booking_create" | "profile_update";
+  confidence: number;
+  summary?: string;
+  missingFields?: string[];
+  fields?: Record<string, unknown>;
+};
+
+export async function extractAgentActionPlan(
+  env: Env,
+  config: BotConfig,
+  userText: string,
+  context: ContextPayload,
+  pendingAction?: unknown
+): Promise<AgentActionPlan | null> {
+  const timezone = env.TIMEZONE || "Europe/Moscow";
+  const system = [
+    "Ты агент-диспетчер Telegram-бота психолога.",
+    "Твоя задача: определить, просит ли клиент выполнить действие: создать напоминание, записаться на консультацию, запомнить факт, добавить данные в профиль.",
+    "Если клиент просто разговаривает или задает вопрос, верни kind=\"none\".",
+    "Если клиент сообщает переживание, симптом, факт о себе или вопрос без слов сохранить/запомнить/добавить в профиль, верни kind=\"none\": долговременная память обновится отдельным пакетным профилированием.",
+    "Если клиент спрашивает свободные окна, цены или расписание без явной просьбы забронировать конкретное время, верни kind=\"none\".",
+    "Создавай reminder_create только при явной просьбе напомнить.",
+    "Создавай booking_create только при явной просьбе записать/забронировать/поставить встречу.",
+    "Создавай profile_update только при явной просьбе запомнить/сохранить/добавить информацию в профиль.",
+    "Если действие найдено, верни только JSON без markdown.",
+    "Не исполняй действие сам. Только предложи структурированные поля для последующего подтверждения программой.",
+    "Для напоминаний о лекарствах записывай только текст клиента, не добавляй дозировки и медицинские инструкции от себя.",
+    "Для записи используй ISO-дату со смещением +03:00, если дата и время понятны. Если не хватает даты, времени или длительности, перечисли недостающие поля.",
+    "Если есть existing_pending_action, трактуй сообщение клиента как правку к pending action и верни обновленное действие того же типа, если возможно.",
+    `current_time=${new Date().toISOString()}`,
+    `timezone=${timezone}`,
+    `services=${JSON.stringify(config.services)}`,
+    `prices=${JSON.stringify(config.prices)}`,
+    `memory_context=${JSON.stringify(context).slice(0, 20_000)}`,
+    `existing_pending_action=${JSON.stringify(pendingAction ?? null)}`,
+    "JSON schema: {\"kind\":\"none|reminder_create|booking_create|profile_update\",\"confidence\":0..1,\"summary\":string,\"missingFields\":string[],\"fields\":{}}",
+    "reminder_create.fields={\"text\":string,\"dueAt\":ISO8601|null,\"timezone\":string,\"repeat\":\"none|daily|weekly|monthly\"}",
+    "booking_create.fields={\"startsAt\":ISO8601|null,\"date\":\"YYYY-MM-DD|null\",\"time\":\"HH:mm|null\",\"durationMinutes\":number|null,\"serviceId\":string|null,\"note\":string|null}",
+    "profile_update.fields={\"tags\":string[],\"profile\":{\"facts\":string[],\"medications\":string[],\"doctors\":string[],\"appointments\":string[],\"problems\":string[],\"preferences\":string[],\"riskNotes\":string[],\"reminders\":string[]},\"riskLevel\":\"none|watch|urgent\",\"nextAction\":string|null}"
+  ].join("\n");
+  const user = `Сообщение клиента: ${userText}`;
+  try {
+    const content = env.OPENROUTER_API_KEY
+      ? await completeOpenRouterWithModelFallbacks(
+          env,
+          {
+            messages: [
+              { role: "system", content: system },
+              { role: "user", content: user }
+            ],
+            temperature: 0.1,
+            max_tokens: 700
+          },
+          ACTION_EXTRACTION_TIMEOUT_MS,
+          ACTION_EXTRACTION_MODEL_TIMEOUT_MS
+        )
+      : await completeOpenAiJson(env, system, user, ACTION_EXTRACTION_TIMEOUT_MS);
+    return sanitizeAgentActionPlan(JSON.parse(stripJsonFences(content)) as AgentActionPlan);
+  } catch {
+    return null;
+  }
+}
 
 export async function answerWithOpenAI(env: Env, config: BotConfig, userText: string, context: ContextPayload): Promise<string> {
   if (!env.OPENAI_API_KEY && env.OPENROUTER_API_KEY) return answerWithOpenRouter(env, config, userText, context);
@@ -85,6 +151,30 @@ export async function answerWithOpenAI(env: Env, config: BotConfig, userText: st
     const body = await response.text();
     throw new Error(`openai_status=${response.status}; body=${body.slice(0, 500)}`);
   }
+  const data = (await response.json()) as { output_text?: string };
+  if (!data.output_text) throw new Error("openai_empty_output_text");
+  return data.output_text;
+}
+
+async function completeOpenAiJson(env: Env, system: string, user: string, timeoutMs: number): Promise<string> {
+  if (!env.OPENAI_API_KEY) throw new Error("missing_ai_provider_secret");
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${env.OPENAI_API_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model: env.OPENAI_MODEL,
+      input: [
+        { role: "system", content: system },
+        { role: "user", content: user }
+      ],
+      temperature: 0.1
+    }),
+    signal: AbortSignal.timeout(timeoutMs)
+  });
+  if (!response.ok) throw new Error(`openai_status=${response.status}; body=${(await response.text()).slice(0, 500)}`);
   const data = (await response.json()) as { output_text?: string };
   if (!data.output_text) throw new Error("openai_empty_output_text");
   return data.output_text;
@@ -321,6 +411,21 @@ function sanitizeExtraction(value: ClientExtraction, timezone: string): ClientEx
     riskLevel: value.riskLevel === "urgent" || value.riskLevel === "watch" ? value.riskLevel : "none",
     nextAction: value.nextAction?.trim() || undefined,
     reminders
+  };
+}
+
+function sanitizeAgentActionPlan(value: AgentActionPlan): AgentActionPlan {
+  const kind = value.kind;
+  if (kind !== "reminder_create" && kind !== "booking_create" && kind !== "profile_update") {
+    return { kind: "none", confidence: 0, missingFields: [], fields: {} };
+  }
+  const fields = value.fields && typeof value.fields === "object" ? value.fields : {};
+  return {
+    kind,
+    confidence: typeof value.confidence === "number" ? Math.min(Math.max(value.confidence, 0), 1) : 0.5,
+    summary: String(value.summary || "").slice(0, 500),
+    missingFields: normalizeList(value.missingFields),
+    fields
   };
 }
 

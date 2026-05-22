@@ -17,7 +17,12 @@ export type TelegramWebhookInfo = {
   allowed_updates?: string[];
 };
 
-export async function sendTelegramMessage(env: Env, chatId: string, text: string): Promise<void> {
+const DEFAULT_KEYBOARD = [
+  [{ text: "Записаться" }, { text: "Свободные окна" }],
+  [{ text: "Цены" }, { text: "Связаться с психологом" }]
+];
+
+export async function sendTelegramMessage(env: Env, chatId: string, text: string, keyboard?: string[][]): Promise<void> {
   const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -26,10 +31,7 @@ export async function sendTelegramMessage(env: Env, chatId: string, text: string
       text,
       parse_mode: "HTML",
       reply_markup: {
-        keyboard: [
-          [{ text: "Записаться" }, { text: "Свободные окна" }],
-          [{ text: "Цены" }, { text: "Связаться с психологом" }]
-        ],
+        keyboard: keyboard ? keyboard.map((row) => row.map((text) => ({ text }))) : DEFAULT_KEYBOARD,
         resize_keyboard: true
       }
     })
