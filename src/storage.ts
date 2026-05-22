@@ -164,6 +164,10 @@ export function normalizeClient(user: Partial<ClientSummary> & { chatId: string 
     botPausedReason: user.botPausedReason || undefined,
     botPausedBy: user.botPausedBy === "admin" || user.botPausedBy === "manual" ? user.botPausedBy : undefined,
     lastAdminReplyAt: user.lastAdminReplyAt || undefined,
+    lastProfiledAt: user.lastProfiledAt || undefined,
+    lastProfiledMessageCount: typeof user.lastProfiledMessageCount === "number" ? user.lastProfiledMessageCount : undefined,
+    longTermMemoryUpdatedAt: user.longTermMemoryUpdatedAt || undefined,
+    memorySummary: user.memorySummary || undefined,
     agentProfile,
     manualProfile
   };
@@ -286,6 +290,22 @@ export async function readStoredText(env: Env, key: string, fallback = ""): Prom
   if (!response.ok) return fallback;
   const data = (await response.json()) as { found: boolean; value?: unknown };
   return data.found && typeof data.value === "string" ? data.value : fallback;
+}
+
+export async function writeStoredText(env: Env, key: string, value: string, contentType = "text/plain; charset=utf-8"): Promise<void> {
+  if (env.BOT_OBJECTS) {
+    await env.BOT_OBJECTS.put(key, value, { httpMetadata: { contentType } });
+    return;
+  }
+  await appStateStub(env).fetch(`https://app-state/kv?key=${encodeURIComponent(key)}`, {
+    method: "PUT",
+    body: JSON.stringify(value)
+  });
+}
+
+export async function appendStoredText(env: Env, key: string, value: string, contentType = "text/markdown; charset=utf-8"): Promise<void> {
+  const current = await readStoredText(env, key, "");
+  await writeStoredText(env, key, `${current}${value}`, contentType);
 }
 
 export async function writeStoredJson<T>(env: Env, key: string, value: T): Promise<void> {

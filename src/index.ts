@@ -7,16 +7,18 @@ import {
   listFreeSlots,
   suggestedDurationForChat
 } from "./calendar";
+import { appendClientMemoryMarkdown, buildClientConversationContext, refreshClientMemoryProfile, shouldRefreshClientMemoryProfile } from "./client_memory";
 import { ChatMemory, memoryStub } from "./memory";
-import { answerWithOpenAI, extractClientProfilePatch } from "./openai";
-import { createReminder, processDueReminders } from "./reminders";
+import { answerWithOpenAI } from "./openai";
+import { processDueReminders } from "./reminders";
 import { appendStoredJsonl, mergedProfile, readConfig, readUsers, upsertClient } from "./storage";
 import { formatAvailability, sendTelegramChatAction, sendTelegramMessage } from "./telegram";
-import type { BotConfig, ClientRiskLevel, ClientSummary, Env, TelegramUpdate } from "./types";
+import type { ClientSummary, Env, TelegramUpdate } from "./types";
 
 type ConversationContext = { profile: unknown; turns: { role: string; text: string; createdAt: string }[] };
 type DayRequest = { label: string; fromIso: string; toIso: string };
 const CLIENT_HANDOFF_MS = 24 * 60 * 60 * 1000;
+const AI_UNAVAILABLE_FALLBACK = "Агент сейчас недоступен, психологу передали информацию. Извините за доставленные неудобства.";
 
 export { ChatMemory };
 
@@ -87,8 +89,10 @@ async function handleText(update: TelegramUpdate, env: Env, ctx: ExecutionContex
     createdAt: receivedAt,
     source: "telegram"
   });
+  await appendClientMemoryMarkdown(env, chatId, { role: "user", text, createdAt: receivedAt, source: "telegram" });
 
-  const context = (await memory.fetch("https://memory/context").then((response) => response.json())) as ConversationContext;
+  const durableContext = (await memory.fetch("https://memory/context").then((response) => response.json())) as ConversationContext;
+  const context = await buildClientConversationContext(env, chatId, baseClient, durableContext);
 
   if (isBotPaused(baseClient)) {
     await appendStoredJsonl(env, "logs/manual_handoff_suppressed.jsonl", {
@@ -160,7 +164,11 @@ async function handleText(update: TelegramUpdate, env: Env, ctx: ExecutionContex
         message: error instanceof Error ? error.message : String(error),
         createdAt: new Date().toISOString()
       });
-      throw error;
+      answer = AI_UNAVAILABLE_FALLBACK;
+      await upsertClient(env, {
+        chatId,
+        nextAction: "Агент не ответил клиенту автоматически. Проверить последнее сообщение вручную."
+      });
     }
   }
 
@@ -176,37 +184,17 @@ async function handleText(update: TelegramUpdate, env: Env, ctx: ExecutionContex
     createdAt: answeredAt,
     source: "bot"
   });
+  await appendClientMemoryMarkdown(env, chatId, { role: "assistant", text: answer, createdAt: answeredAt, source: "bot" });
   await sendTelegramMessage(env, chatId, answer);
-  ctx.waitUntil(extractAndStoreClientSignals(env, config, chatId, text, context));
+  const latestClient = (await readUsers(env)).find((client) => client.chatId === chatId) ?? baseClient;
+  if (shouldRefreshClientMemoryProfile(latestClient)) {
+    ctx.waitUntil(refreshClientMemoryProfile(env, config, chatId, "auto_50_messages").catch((error) => logProfileRefreshError(env, chatId, error)));
+  }
 }
 
 function isBotPaused(client: ClientSummary): boolean {
   const timestamp = Date.parse(client.botPausedUntil || "");
   return Number.isFinite(timestamp) && timestamp > Date.now();
-}
-
-async function extractAndStoreClientSignals(env: Env, config: BotConfig, chatId: string, text: string, context: ConversationContext): Promise<void> {
-  try {
-    const extraction = await extractClientProfilePatch(env, config, text, context);
-    if (!extraction) return;
-    await upsertClient(env, {
-      chatId,
-      tags: extraction.tags,
-      agentProfile: extraction.profile,
-      riskLevel: mergeRisk(undefined, extraction.riskLevel),
-      nextAction: extraction.nextAction
-    });
-    for (const reminder of extraction.reminders ?? []) {
-      await createReminder(env, { chatId, text: reminder.text, dueAt: reminder.dueAt, timezone: reminder.timezone, source: "agent" });
-    }
-  } catch (error) {
-    await appendStoredJsonl(env, "logs/profile_extract_errors.jsonl", {
-      chatId,
-      text: text.slice(0, 500),
-      message: error instanceof Error ? error.message : String(error),
-      createdAt: new Date().toISOString()
-    });
-  }
 }
 
 async function availabilityAnswer(env: Env, client: ClientSummary, durationMinutes: number): Promise<string> {
@@ -285,10 +273,12 @@ function addDays(dateKey: string, days: number): string {
   return localDateKey(new Date(timestamp), "Europe/Moscow");
 }
 
-function mergeRisk(current: ClientRiskLevel | undefined, next: ClientRiskLevel | undefined): ClientRiskLevel {
-  if (current === "urgent" || next === "urgent") return "urgent";
-  if (current === "watch" || next === "watch") return "watch";
-  return "none";
+async function logProfileRefreshError(env: Env, chatId: string, error: unknown): Promise<void> {
+  await appendStoredJsonl(env, "logs/profile_extract_errors.jsonl", {
+    chatId,
+    message: error instanceof Error ? error.message : String(error),
+    createdAt: new Date().toISOString()
+  });
 }
 
 function formatHeldBooking(booking: { startsAt: string; endsAt: string }): string {

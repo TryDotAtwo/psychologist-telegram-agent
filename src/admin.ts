@@ -1,4 +1,5 @@
 import { calendarConnectionStatus, createBooking, listAvailability, syncGoogleCalendarCache, visibleBusyRanges } from "./calendar";
+import { appendClientMemoryMarkdown, refreshClientMemoryProfile } from "./client_memory";
 import { createGoogleAuthUrl, handleGoogleCallback } from "./google";
 import { memoryStub } from "./memory";
 import { answerWithOpenAI, openRouterModelCandidates } from "./openai";
@@ -48,6 +49,7 @@ export async function handleAdminApi(request: Request, env: Env): Promise<Respon
   if (userRoute && request.method === "PUT" && userRoute.action === "profile") return Response.json(await updateUserProfile(request, env, userRoute.chatId));
   if (userRoute && request.method === "POST" && userRoute.action === "reply") return sendAdminReply(request, env, userRoute.chatId);
   if (userRoute && request.method === "POST" && userRoute.action === "bot-resume") return resumeBotForClient(env, userRoute.chatId);
+  if (userRoute && request.method === "POST" && userRoute.action === "profile-refresh") return refreshProfileFromDashboard(env, userRoute.chatId);
 
   if (request.method === "GET" && url.pathname === "/api/calendar/schedule") return Response.json(await readSchedule(env));
   if (request.method === "PUT" && url.pathname === "/api/calendar/schedule") {
@@ -155,10 +157,21 @@ async function syncTelegramWebhook(request: Request, env: Env): Promise<Record<s
   };
 }
 
-function parseUserRoute(pathname: string): { chatId: string; action: "profile" | "messages" | "reply" | "bot-resume" } | null {
-  const match = pathname.match(/^\/api\/users\/([^/]+)(?:\/(messages|reply|bot\/resume))?$/);
+function parseUserRoute(pathname: string): { chatId: string; action: "profile" | "messages" | "reply" | "bot-resume" | "profile-refresh" } | null {
+  const match = pathname.match(/^\/api\/users\/([^/]+)(?:\/(.+))?$/);
   if (!match) return null;
-  const action = match[2] === "messages" || match[2] === "reply" ? match[2] : match[2] === "bot/resume" ? "bot-resume" : "profile";
+  const suffix = match[2] ?? "";
+  const action =
+    suffix === "messages" || suffix === "reply"
+      ? suffix
+      : suffix === "bot/resume"
+        ? "bot-resume"
+        : suffix === "profile/refresh"
+          ? "profile-refresh"
+          : suffix
+            ? null
+            : "profile";
+  if (!action) return null;
   return { chatId: decodeURIComponent(match[1]), action };
 }
 
@@ -199,6 +212,7 @@ async function sendAdminReply(request: Request, env: Env, chatId: string): Promi
   }
   const createdAt = new Date().toISOString();
   await appendStoredJsonl(env, `transcripts/${chatId}.jsonl`, { role: "assistant", text, createdAt, source: "admin" });
+  await appendClientMemoryMarkdown(env, chatId, { role: "assistant", text, createdAt, source: "admin" });
   await memoryStub(env, chatId).fetch("https://memory/turn", {
     method: "POST",
     body: JSON.stringify({ role: "assistant", text, createdAt })
@@ -236,6 +250,13 @@ async function resumeBotForClient(env: Env, chatId: string): Promise<Response> {
     createdAt
   });
   return Response.json({ ok: true, createdAt, client: { ...next, mergedProfile: mergedProfile(next) } });
+}
+
+async function refreshProfileFromDashboard(env: Env, chatId: string): Promise<Response> {
+  const config = await readConfig(env);
+  const client = await refreshClientMemoryProfile(env, config, chatId, "manual_dashboard");
+  if (!client) return Response.json({ error: "not_found" }, { status: 404 });
+  return Response.json({ ok: true, client: { ...client, mergedProfile: mergedProfile(client) } });
 }
 
 function normalizeSchedule(schedule: WorkSchedule, env: Env): WorkSchedule {

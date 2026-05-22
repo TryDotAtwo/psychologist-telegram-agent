@@ -131,6 +131,10 @@ export type ClientSummary = {
   botPausedReason?: string;
   botPausedBy?: "admin" | "manual";
   lastAdminReplyAt?: string;
+  lastProfiledAt?: string;
+  lastProfiledMessageCount?: number;
+  longTermMemoryUpdatedAt?: string;
+  memorySummary?: string;
   agentProfile: ClientProfileData;
   manualProfile: ClientProfileData;
 };

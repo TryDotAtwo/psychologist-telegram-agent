@@ -212,6 +212,7 @@ function setupStaticHandlers() {
   });
   document.getElementById("resumeBot").onclick = resumeBotForClient;
   document.getElementById("saveClientProfile").onclick = saveClientProfile;
+  document.getElementById("refreshClientProfile").onclick = refreshClientProfile;
   document.getElementById("addReminder").onclick = addManualReminder;
   document.getElementById("addService").onclick = addService;
   document.getElementById("addPrice").onclick = addPrice;
@@ -545,7 +546,7 @@ function renderDetailedProfile() {
   }
   const profile = mergedProfile(user);
   document.getElementById("profileClientName").textContent = displayClientName(user);
-  document.getElementById("profileClientMeta").textContent = `chat_id=${user.chatId}; сообщений=${user.messageCount}`;
+  document.getElementById("profileClientMeta").textContent = `chat_id=${user.chatId}; сообщений=${user.messageCount}; память=${profileMemoryLabel(user)}`;
   const profileRisk = document.getElementById("profileRiskBadge");
   profileRisk.textContent = riskLabel(user.riskLevel);
   profileRisk.className = `risk ${user.riskLevel}`;
@@ -678,6 +679,24 @@ async function saveClientProfile() {
   renderDetailedProfile();
 }
 
+async function refreshClientProfile() {
+  const user = users.find((item) => item.chatId === selectedClientId);
+  const status = document.getElementById("clientSaveStatus");
+  if (!user) return;
+  status.textContent = "Обновляю долговременную память и профиль...";
+  try {
+    const result = await api(`/api/users/${encodeURIComponent(user.chatId)}/profile/refresh`, { method: "POST", body: "{}" });
+    if (result.client) users = users.map((item) => (item.chatId === result.client.chatId ? result.client : item));
+    status.textContent = "Память и профиль обновлены.";
+    renderUsers();
+    renderProfiles();
+    renderClient();
+    renderDetailedProfile();
+  } catch {
+    status.textContent = "Не удалось обновить память. Проверьте AI-статус и повторите позже.";
+  }
+}
+
 function renderClientReminders(chatId) {
   const list = reminders
     .filter((reminder) => reminder.chatId === chatId)
@@ -807,11 +826,18 @@ function mergedProfile(user) {
 
 function profileListHint(user) {
   const profile = mergedProfile(user);
-  return first(profile.problems) || first(profile.facts) || user.lastUserText || "нет краткой сводки";
+  return user.memorySummary || first(profile.problems) || first(profile.facts) || user.lastUserText || "нет краткой сводки";
 }
 
 function sortedUsers() {
   return [...users].sort((a, b) => Date.parse(b.lastMessageAt || 0) - Date.parse(a.lastMessageAt || 0));
+}
+
+function profileMemoryLabel(user) {
+  const profiled = user.lastProfiledMessageCount || 0;
+  const total = user.messageCount || 0;
+  if (!profiled) return "профиль еще не собирался";
+  return `${profiled}/${total} сообщений; ${humanDateTime(user.longTermMemoryUpdatedAt || user.lastProfiledAt)}`;
 }
 
 function isBotPaused(user) {
