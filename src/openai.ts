@@ -25,8 +25,8 @@ type OpenRouterResponse = {
 
 const ANSWER_TIMEOUT_MS = 28_000;
 const EXTRACTION_TIMEOUT_MS = 10_000;
-const ANSWER_MODEL_TIMEOUT_MS = 4_000;
-const EXTRACTION_MODEL_TIMEOUT_MS = 2_000;
+const ANSWER_MODEL_TIMEOUT_MS = 10_000;
+const EXTRACTION_MODEL_TIMEOUT_MS = 5_000;
 const OPENROUTER_DEFAULT_MODEL = "deepseek/deepseek-v4-flash:free";
 const OPENROUTER_FINAL_ROUTER = "openrouter/free";
 const OPENROUTER_FREE_FALLBACK_MODELS = [
@@ -178,20 +178,35 @@ function randomIndex(maxExclusive: number): number {
 
 async function completeOpenRouterWithModelFallbacks(env: Env, payload: OpenRouterPayload, totalTimeoutMs: number, modelTimeoutMs: number): Promise<string> {
   const startedAt = Date.now();
-  const errors: string[] = [];
-  for (const model of openRouterModelCandidates(env, true)) {
-    const remainingMs = totalTimeoutMs - (Date.now() - startedAt);
-    if (remainingMs <= 0) break;
-    try {
-      return await completeOpenRouter(env, { ...payload, model }, Math.min(modelTimeoutMs, remainingMs));
-    } catch (error) {
-      errors.push(`${model}: ${error instanceof Error ? error.message : String(error)}`.slice(0, 220));
-    }
+  const timeoutMs = Math.min(modelTimeoutMs, totalTimeoutMs);
+  const controllers: AbortController[] = [];
+  const attempts = openRouterModelCandidates(env, true).map((model) => {
+    const controller = new AbortController();
+    controllers.push(controller);
+    return completeOpenRouter(env, { ...payload, model }, timeoutMs, controller.signal)
+      .then((text) => {
+        controllers.forEach((item) => {
+          if (item !== controller) item.abort();
+        });
+        return text;
+      })
+      .catch((error) => {
+        throw new Error(`${model}: ${error instanceof Error ? error.message : String(error)}`.slice(0, 240));
+      });
+  });
+  try {
+    return await Promise.any(attempts);
+  } catch (error) {
+    const errors = error instanceof AggregateError ? error.errors.map((item) => (item instanceof Error ? item.message : String(item))) : [String(error)];
+    const elapsedMs = Date.now() - startedAt;
+    throw new Error(`openrouter_all_models_failed; elapsedMs=${elapsedMs}; attempts=${errors.join(" | ").slice(0, 1400)}`);
+  } finally {
+    controllers.forEach((controller) => controller.abort());
   }
-  throw new Error(`openrouter_all_models_failed; attempts=${errors.join(" | ").slice(0, 1200)}`);
 }
 
-async function completeOpenRouter(env: Env, payload: OpenRouterPayload, timeoutMs: number): Promise<string> {
+async function completeOpenRouter(env: Env, payload: OpenRouterPayload, timeoutMs: number, signal?: AbortSignal): Promise<string> {
+  const timeout = AbortSignal.timeout(timeoutMs);
   const baseUrl = env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1";
   const response = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
     method: "POST",
@@ -202,7 +217,7 @@ async function completeOpenRouter(env: Env, payload: OpenRouterPayload, timeoutM
       "X-Title": "Psychologist Telegram Agent"
     },
     body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(timeoutMs)
+    signal: signal ? AbortSignal.any([signal, timeout]) : timeout
   });
   if (!response.ok) {
     const body = await response.text();

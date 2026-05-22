@@ -89,7 +89,6 @@ async function handleText(update: TelegramUpdate, env: Env, ctx: ExecutionContex
   });
 
   const context = (await memory.fetch("https://memory/context").then((response) => response.json())) as ConversationContext;
-  ctx.waitUntil(extractAndStoreClientSignals(env, config, chatId, text, context));
 
   if (isBotPaused(baseClient)) {
     await appendStoredJsonl(env, "logs/manual_handoff_suppressed.jsonl", {
@@ -177,6 +176,7 @@ async function handleText(update: TelegramUpdate, env: Env, ctx: ExecutionContex
     source: "bot"
   });
   await sendTelegramMessage(env, chatId, answer);
+  ctx.waitUntil(extractAndStoreClientSignals(env, config, chatId, text, context));
 }
 
 function isBotPaused(client: ClientSummary): boolean {
