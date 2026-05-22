@@ -13,7 +13,7 @@ import { ChatMemory, memoryStub } from "./memory";
 import { answerWithOpenAI } from "./openai";
 import { handleReminderFollowUpResponse, processDueReminders } from "./reminders";
 import { appendStoredJsonl, mergedProfile, readConfig, readUsers, upsertClient } from "./storage";
-import { formatAvailability, sendTelegramChatAction, sendTelegramMessage } from "./telegram";
+import { escapeTelegramHtml, formatAvailability, sendTelegramChatAction, sendTelegramMessage } from "./telegram";
 import type { BotConfig, ClientSummary, Env, TelegramUpdate } from "./types";
 
 type ConversationContext = { profile: unknown; turns: { role: string; text: string; createdAt: string }[] };
@@ -138,7 +138,9 @@ async function handleText(incoming: RecordedIncomingText, env: Env, ctx: Executi
     answer =
       "Здравствуйте. Я помогу с записью, ценами и базовой навигацией по консультациям. Можно написать: свободные окна, цены, записаться или связаться с психологом.";
   } else if (/^(цены|прайс)$/i.test(text)) {
-    answer = config.prices.map((price) => `${serviceTitleById(config, price.serviceId)}: ${price.amount} ${price.currency}; ${price.note}`).join("\n");
+    answer = config.prices
+      .map((price) => `${escapeTelegramHtml(serviceTitleById(config, price.serviceId))}: ${price.amount} ${escapeTelegramHtml(price.currency)}; ${escapeTelegramHtml(price.note)}`)
+      .join("\n");
   } else if (isHumanContactRequest(text)) {
     const botPausedUntil = new Date(Date.now() + CLIENT_HANDOFF_MS).toISOString();
     await upsertClient(env, {
@@ -342,7 +344,7 @@ function formatHeldBooking(booking: { startsAt: string; endsAt: string; duration
     timeZone: "Europe/Moscow"
   }).format(end);
   const serviceName = serviceTitleByDuration(config, booking.durationMinutes);
-  return `Готово. Окно временно удержано.\n\nУслуга: ${serviceName}\nКогда: ${day}, ${time}-${endTime}.\nПсихолог подтвердит запись.`;
+  return `Готово. Окно временно удержано.\n\nУслуга: ${escapeTelegramHtml(serviceName)}\nКогда: ${day}, ${time}-${endTime}.\nПсихолог подтвердит запись.`;
 }
 
 function serviceTitleById(config: BotConfig, serviceId: string): string {
