@@ -160,6 +160,9 @@ export function normalizeClient(user: Partial<ClientSummary> & { chatId: string 
     reminders: mergeUnique(agentProfile.reminders, manualProfile.reminders),
     riskLevel: user.riskLevel ?? "none",
     nextAction: user.nextAction,
+    attentionAt: user.attentionAt || undefined,
+    attentionReason:
+      user.attentionReason === "client_requested_psychologist" || user.attentionReason === "manual_dialog_active" ? user.attentionReason : undefined,
     botPausedUntil: user.botPausedUntil || undefined,
     botPausedReason: user.botPausedReason || undefined,
     botPausedBy: user.botPausedBy === "admin" || user.botPausedBy === "manual" ? user.botPausedBy : undefined,

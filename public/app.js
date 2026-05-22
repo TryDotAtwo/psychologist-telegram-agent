@@ -13,6 +13,7 @@ let refreshInFlight = false;
 let lastRenderedChatId = null;
 let lastMessagesKey = "";
 let lastReminderComposerClientId = null;
+let attentionNotifyReady = false;
 
 const loginScreen = document.getElementById("loginScreen");
 const app = document.getElementById("app");
@@ -76,6 +77,7 @@ async function load() {
     api("/api/reminders").catch(() => [])
   ]);
   await loadAvailability(duration);
+  seedAttentionNotifications(users);
   renderAll();
   loginScreen.classList.add("hidden");
   app.classList.remove("hidden");
@@ -93,8 +95,8 @@ async function loadAvailability(duration = 30) {
 
 function startRealtimeRefresh() {
   stopRealtimeRefresh();
-  refreshTimer = setInterval(refreshDashboardData, 5000);
-  messageRefreshTimer = setInterval(refreshSelectedMessages, 2500);
+  refreshTimer = setInterval(refreshDashboardData, 2000);
+  messageRefreshTimer = setInterval(refreshSelectedMessages, 1000);
 }
 
 function stopRealtimeRefresh() {
@@ -108,10 +110,14 @@ async function refreshDashboardData(force = false) {
   if (app.classList.contains("hidden") || (refreshInFlight && !force)) return;
   refreshInFlight = true;
   try {
-    [users, reminders] = await Promise.all([
+    const previousUsers = users;
+    const [nextUsers, nextReminders] = await Promise.all([
       api("/api/users").catch(() => users),
       api("/api/reminders").catch(() => reminders)
     ]);
+    users = nextUsers;
+    reminders = nextReminders;
+    notifyAttentionChanges(previousUsers, users);
     const visibleUsers = sortedUsers();
     if (selectedClientId && !visibleUsers.some((user) => user.chatId === selectedClientId)) selectedClientId = visibleUsers[0]?.chatId || null;
     if (!selectedClientId && visibleUsers[0]) selectedClientId = visibleUsers[0].chatId;
@@ -261,6 +267,7 @@ function openSection(section) {
 function renderOverview() {
   const scheduledReminders = reminders.filter((reminder) => reminder.status === "scheduled");
   const visibleUsers = sortedUsers();
+  const attentionUsers = visibleUsers.filter(isAttentionUser);
   const riskUsers = visibleUsers.filter((user) => user.riskLevel === "urgent" || user.riskLevel === "watch");
   document.getElementById("metricClients").textContent = String(users.length);
   document.getElementById("metricAvailability").textContent = String(availability.length);
@@ -273,14 +280,16 @@ function renderOverview() {
     ? availability.slice(0, 6).map((slot) => availabilityListItem(slot)).join("")
     : `<div class="empty-state">Свободных окон нет. Проверьте рабочие часы или Google Calendar.</div>`;
   attachAvailabilityHandlers(document.getElementById("overviewAvailability"));
-  if (riskUsers.length) document.getElementById("sidebarStatus").textContent = `Требуют внимания: ${riskUsers.length}`;
+  if (attentionUsers.length) document.getElementById("sidebarStatus").textContent = `Ждут психолога: ${attentionUsers.length}`;
+  else if (riskUsers.length) document.getElementById("sidebarStatus").textContent = `Требуют внимания: ${riskUsers.length}`;
+  else document.getElementById("sidebarStatus").textContent = "Бот активен";
 }
 
 function activityRow(user) {
   return `
     <button class="activity-row" data-client-open="${escapeAttr(user.chatId)}">
       <span><b>${escapeHtml(displayClientName(user))}</b><small>${escapeHtml(clientPreviewText(user, user.lastUserText))}</small></span>
-      <em class="risk ${user.riskLevel}">${riskLabel(user.riskLevel)}</em>
+      <span class="row-badges">${attentionPill(user)}<em class="risk ${user.riskLevel}">${riskLabel(user.riskLevel)}</em></span>
     </button>
   `;
 }
@@ -467,7 +476,7 @@ function renderUsers() {
     ? visibleUsers.map((user) => `
       <button class="client-row ${user.chatId === selectedClientId ? "selected" : ""}" data-client-open="${escapeAttr(user.chatId)}">
         <span><b>${escapeHtml(displayClientName(user))}</b><small>${escapeHtml(clientPreviewText(user, user.lastUserText))}</small></span>
-        <em class="risk ${user.riskLevel}">${riskLabel(user.riskLevel)}</em>
+        <span class="row-badges">${attentionPill(user)}<em class="risk ${user.riskLevel}">${riskLabel(user.riskLevel)}</em></span>
       </button>
     `).join("")
     : `<div class="empty-state">Клиенты появятся после первых сообщений в Telegram.</div>`;
@@ -481,7 +490,7 @@ function renderProfiles() {
     ? visibleUsers.map((user) => `
       <button class="client-row ${user.chatId === selectedClientId ? "selected" : ""}" data-client-open="${escapeAttr(user.chatId)}">
         <span><b>${escapeHtml(displayClientName(user))}</b><small>${escapeHtml(profileListHint(user))}</small></span>
-        <em class="risk ${user.riskLevel}">${riskLabel(user.riskLevel)}</em>
+        <span class="row-badges">${attentionPill(user)}<em class="risk ${user.riskLevel}">${riskLabel(user.riskLevel)}</em></span>
       </button>
     `).join("")
     : `<div class="empty-state">Профили появятся после первых сообщений в Telegram.</div>`;
@@ -830,7 +839,49 @@ function profileListHint(user) {
 }
 
 function sortedUsers() {
-  return [...users].sort((a, b) => Date.parse(b.lastMessageAt || 0) - Date.parse(a.lastMessageAt || 0));
+  return [...users].sort((a, b) => attentionTimestamp(b) - attentionTimestamp(a) || displayClientName(a).localeCompare(displayClientName(b), "ru"));
+}
+
+function attentionTimestamp(user) {
+  const timestamp = Date.parse(user?.attentionAt || "");
+  return isAttentionUser(user) && Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function isAttentionUser(user) {
+  if (!user?.attentionAt) return false;
+  return isBotPaused(user) || user.attentionReason === "client_requested_psychologist" || user.attentionReason === "manual_dialog_active";
+}
+
+function attentionPill(user) {
+  if (!isAttentionUser(user)) return "";
+  return `<em class="status-pill attention">${attentionLabel(user)}</em>`;
+}
+
+function attentionLabel(user) {
+  if (user.attentionReason === "client_requested_psychologist") return "позвал";
+  return "ручной";
+}
+
+function seedAttentionNotifications(list) {
+  attentionNotifyReady = true;
+  document.title = list.some(isAttentionUser) ? "НейроПсихолог · ждут ответа" : "НейроПсихолог";
+}
+
+function notifyAttentionChanges(previousUsers, nextUsers) {
+  if (!attentionNotifyReady) {
+    seedAttentionNotifications(nextUsers);
+    return;
+  }
+  const previousAttention = new Map(previousUsers.map((user) => [user.chatId, Date.parse(user.attentionAt || "") || 0]));
+  const fresh = nextUsers.filter((user) => {
+    const nextTime = attentionTimestamp(user);
+    return nextTime > 0 && nextTime > (previousAttention.get(user.chatId) || 0);
+  });
+  if (fresh.length) {
+    const names = fresh.slice(0, 2).map(displayClientName).join(", ");
+    document.getElementById("saveStatus").textContent = `Нужен психолог: ${names}${fresh.length > 2 ? ` и еще ${fresh.length - 2}` : ""}.`;
+  }
+  document.title = nextUsers.some(isAttentionUser) ? "НейроПсихолог · ждут ответа" : "НейроПсихолог";
 }
 
 function profileMemoryLabel(user) {

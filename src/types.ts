@@ -91,6 +91,7 @@ export type LegacyCalendarSlot = {
 };
 
 export type ClientRiskLevel = "none" | "watch" | "urgent";
+export type ClientAttentionReason = "client_requested_psychologist" | "manual_dialog_active";
 
 export type SessionHistoryItem = {
   startsAt: string;
@@ -140,6 +141,8 @@ export type ClientSummary = {
   reminders: string[];
   riskLevel: ClientRiskLevel;
   nextAction?: string;
+  attentionAt?: string;
+  attentionReason?: ClientAttentionReason;
   botPausedUntil?: string;
   botPausedReason?: string;
   botPausedBy?: "admin" | "manual";

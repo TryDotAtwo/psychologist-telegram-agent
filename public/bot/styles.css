@@ -318,6 +318,13 @@ p { margin: 6px 0 0; color: var(--muted); line-height: 1.45; }
   gap: 3px;
   min-width: 0;
 }
+.activity-row .row-badges, .client-row .row-badges {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: max-content;
+}
 .activity-row small, .client-row small, .slot-list-item small, .booking-item small, .reminder-item small {
   color: var(--muted);
   overflow: hidden;
@@ -359,6 +366,7 @@ p { margin: 6px 0 0; color: var(--muted); line-height: 1.45; }
 .risk.urgent { background: rgba(217, 91, 80, 0.16); color: var(--coral); }
 .status-pill.free { background: rgba(36, 184, 170, 0.13); color: var(--teal-dark); }
 .status-pill.busy { background: rgba(217, 91, 80, 0.15); color: var(--coral); }
+.status-pill.attention { background: rgba(36, 184, 170, 0.18); color: var(--teal-dark); }
 
 .client-console {
   display: grid;

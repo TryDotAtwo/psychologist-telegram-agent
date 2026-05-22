@@ -18,6 +18,7 @@ import type { ClientSummary, Env, TelegramUpdate } from "./types";
 
 type ConversationContext = { profile: unknown; turns: { role: string; text: string; createdAt: string }[] };
 type DayRequest = { label: string; fromIso: string; toIso: string };
+type RecordedIncomingText = { chatId: string; text: string; receivedAt: string; client: ClientSummary };
 const CLIENT_HANDOFF_MS = 24 * 60 * 60 * 1000;
 const AI_UNAVAILABLE_FALLBACK = "Агент сейчас недоступен, психологу передали информацию. Извините за доставленные неудобства.";
 
@@ -56,19 +57,23 @@ async function handleTelegramWebhook(request: Request, env: Env, ctx: ExecutionC
     return new Response("unauthorized", { status: 401 });
   }
   const update = (await request.json()) as TelegramUpdate;
-  if (update.message?.text) ctx.waitUntil(handleText(update, env, ctx));
+  if (update.message?.text) {
+    const incoming = await recordIncomingText(update, env);
+    ctx.waitUntil(handleText(incoming, env, ctx));
+  }
   return Response.json({ ok: true });
 }
 
-async function handleText(update: TelegramUpdate, env: Env, ctx: ExecutionContext): Promise<void> {
+async function recordIncomingText(update: TelegramUpdate, env: Env): Promise<RecordedIncomingText> {
   const message = update.message;
-  if (!message?.text) return;
+  if (!message?.text) throw new Error("missing_text_message");
   const chatId = String(message.chat.id);
   const text = message.text.trim();
-  const config = await readConfig(env);
   const memory = memoryStub(env, chatId);
   const receivedAt = new Date().toISOString();
   const existingClient = (await readUsers(env)).find((client) => client.chatId === chatId);
+  const contactRequested = isHumanContactRequest(text);
+  const attentionNeeded = contactRequested || Boolean(existingClient && isBotPaused(existingClient));
 
   const baseClient = await upsertClient(env, {
     chatId,
@@ -77,7 +82,9 @@ async function handleText(update: TelegramUpdate, env: Env, ctx: ExecutionContex
     lastName: message.chat.last_name,
     lastMessageAt: receivedAt,
     lastUserText: text,
-    messageCount: (existingClient?.messageCount ?? 0) + 1
+    messageCount: (existingClient?.messageCount ?? 0) + 1,
+    attentionAt: attentionNeeded ? receivedAt : existingClient?.attentionAt,
+    attentionReason: attentionNeeded ? (contactRequested ? "client_requested_psychologist" : "manual_dialog_active") : existingClient?.attentionReason
   });
 
   await memory.fetch("https://memory/turn", {
@@ -91,6 +98,13 @@ async function handleText(update: TelegramUpdate, env: Env, ctx: ExecutionContex
     source: "telegram"
   });
   await appendClientMemoryMarkdown(env, chatId, { role: "user", text, createdAt: receivedAt, source: "telegram" });
+  return { chatId, text, receivedAt, client: baseClient };
+}
+
+async function handleText(incoming: RecordedIncomingText, env: Env, ctx: ExecutionContext): Promise<void> {
+  const { chatId, text, receivedAt, client: baseClient } = incoming;
+  const config = await readConfig(env);
+  const memory = memoryStub(env, chatId);
 
   const durableContext = (await memory.fetch("https://memory/context").then((response) => response.json())) as ConversationContext;
   const context = await buildClientConversationContext(env, chatId, baseClient, durableContext);
@@ -123,6 +137,8 @@ async function handleText(update: TelegramUpdate, env: Env, ctx: ExecutionContex
     await upsertClient(env, {
       chatId,
       nextAction: "Клиент просит связаться с психологом.",
+      attentionAt: receivedAt,
+      attentionReason: "client_requested_psychologist",
       botPausedUntil,
       botPausedBy: "manual",
       botPausedReason: "client_requested_psychologist"

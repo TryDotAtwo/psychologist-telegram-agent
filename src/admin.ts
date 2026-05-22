@@ -223,6 +223,8 @@ async function sendAdminReply(request: Request, env: Env, chatId: string): Promi
     lastAssistantText: text,
     lastMessageAt: createdAt,
     lastAdminReplyAt: createdAt,
+    attentionAt: createdAt,
+    attentionReason: "manual_dialog_active",
     botPausedUntil,
     botPausedBy: "admin",
     botPausedReason: "manual_admin_reply"
@@ -240,6 +242,8 @@ async function resumeBotForClient(env: Env, chatId: string): Promise<Response> {
   const createdAt = new Date().toISOString();
   const next = await upsertClient(env, {
     chatId,
+    attentionAt: undefined,
+    attentionReason: undefined,
     botPausedUntil: undefined,
     botPausedReason: undefined,
     botPausedBy: undefined
