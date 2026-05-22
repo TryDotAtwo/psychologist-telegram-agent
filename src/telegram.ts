@@ -40,6 +40,18 @@ export async function sendTelegramMessage(env: Env, chatId: string, text: string
   }
 }
 
+export async function sendTelegramChatAction(env: Env, chatId: string, action = "typing"): Promise<void> {
+  const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendChatAction`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, action })
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`telegram_chat_action_status=${response.status}; body=${body.slice(0, 300)}`);
+  }
+}
+
 export async function getTelegramWebhookInfo(env: Env): Promise<TelegramApiResponse<TelegramWebhookInfo>> {
   const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/getWebhookInfo`);
   const payload = (await response.json()) as TelegramApiResponse<TelegramWebhookInfo>;

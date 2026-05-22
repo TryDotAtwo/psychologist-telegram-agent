@@ -11,7 +11,7 @@ import { ChatMemory, memoryStub } from "./memory";
 import { answerWithOpenAI, extractClientProfilePatch } from "./openai";
 import { createReminder, processDueReminders } from "./reminders";
 import { appendStoredJsonl, mergedProfile, readConfig, readUsers, upsertClient } from "./storage";
-import { formatAvailability, sendTelegramMessage } from "./telegram";
+import { formatAvailability, sendTelegramChatAction, sendTelegramMessage } from "./telegram";
 import type { BotConfig, ClientRiskLevel, ClientSummary, Env, TelegramUpdate } from "./types";
 
 type ConversationContext = { profile: unknown; turns: { role: string; text: string; createdAt: string }[] };
@@ -152,6 +152,7 @@ async function handleText(update: TelegramUpdate, env: Env, ctx: ExecutionContex
     }
   } else {
     try {
+      ctx.waitUntil(sendTelegramChatAction(env, chatId).catch(() => undefined));
       answer = await answerWithOpenAI(env, config, text, context);
     } catch (error) {
       await appendStoredJsonl(env, "logs/ai_errors.jsonl", {
