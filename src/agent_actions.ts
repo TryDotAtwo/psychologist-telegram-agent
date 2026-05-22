@@ -1,4 +1,4 @@
-import { createBooking, listAvailability } from "./calendar";
+import { createBooking, listAvailability, suggestedDurationForChat } from "./calendar";
 import { extractAgentActionPlan, type AgentActionPlan } from "./openai";
 import { createReminder } from "./reminders";
 import { appendStoredJsonl, upsertClient } from "./storage";
@@ -30,12 +30,13 @@ export async function handleAgentActionFlow(
 ): Promise<ActionFlowResult | null> {
   if (client.pendingAction) return handlePendingAction(env, config, chatId, text, client, context);
   const plan = await extractAgentActionPlan(env, config, text, context);
-  if (!plan) {
+  const effectivePlan = isActionPlanUsable(plan) ? plan : await fallbackAgentActionPlan(env, config, chatId, text, client);
+  if (!effectivePlan) {
     await logActionExtractionMiss(env, chatId, text, "new_action");
     return null;
   }
-  if (plan.kind === "none" || plan.confidence < 0.55) return null;
-  const pending = toPendingAction(plan, text);
+  const enrichedPlan = await enrichActionPlanDefaults(env, config, chatId, text, client, effectivePlan);
+  const pending = toPendingAction(enrichedPlan, text);
   await upsertClient(env, { chatId, pendingAction: pending });
   return {
     handled: true,
@@ -65,7 +66,10 @@ async function handlePendingAction(
   }
 
   const plan = await extractAgentActionPlan(env, config, text, context, existingAction);
-  if (!plan || plan.kind === "none") {
+  const effectivePlan = isActionPlanUsable(plan)
+    ? { ...plan, kind: plan.kind === existingAction.kind ? plan.kind : existingAction.kind }
+    : await fallbackAgentActionPlan(env, config, chatId, text, client, existingAction);
+  if (!effectivePlan) {
     if (!plan) await logActionExtractionMiss(env, chatId, text, "pending_correction");
     return {
       handled: true,
@@ -73,7 +77,8 @@ async function handlePendingAction(
       keyboard: CORRECTION_KEYBOARD
     };
   }
-  const pending = toPendingAction(plan, existingAction.originalText, existingAction);
+  const enrichedPlan = await enrichActionPlanDefaults(env, config, chatId, text, client, effectivePlan, existingAction);
+  const pending = toPendingAction(enrichedPlan, existingAction.originalText, existingAction);
   await upsertClient(env, { chatId, pendingAction: pending });
   return {
     handled: true,
@@ -170,6 +175,253 @@ async function executeProfileAction(env: Env, chatId: string, action: PendingAct
   if (riskLevel) patch.riskLevel = riskLevel;
   await upsertClient(env, patch);
   return { handled: true, answer: "Готово. Информация добавлена в профиль клиента." };
+}
+
+function isActionPlanUsable(plan: AgentActionPlan | null): plan is AgentActionPlan & { kind: PendingAction["kind"] } {
+  return Boolean(plan && plan.kind !== "none" && plan.confidence >= 0.55);
+}
+
+async function fallbackAgentActionPlan(
+  env: Env,
+  config: BotConfig,
+  chatId: string,
+  text: string,
+  client: ClientSummary,
+  existingAction?: PendingAction
+): Promise<(AgentActionPlan & { kind: PendingAction["kind"] }) | null> {
+  if (existingAction?.kind === "reminder_create" || (!existingAction && hasReminderIntent(text))) {
+    return fallbackReminderPlan(env, text);
+  }
+  if (existingAction?.kind === "booking_create" || (!existingAction && hasBookingIntent(text))) {
+    return fallbackBookingPlan(env, config, chatId, text, client, existingAction);
+  }
+  if (existingAction?.kind === "profile_update" || (!existingAction && hasProfileUpdateIntent(text))) {
+    return fallbackProfilePlan(text);
+  }
+  return null;
+}
+
+async function enrichActionPlanDefaults(
+  env: Env,
+  config: BotConfig,
+  chatId: string,
+  text: string,
+  client: ClientSummary,
+  plan: AgentActionPlan & { kind: PendingAction["kind"] },
+  existingAction?: PendingAction
+): Promise<AgentActionPlan & { kind: PendingAction["kind"] }> {
+  if (plan.kind === "reminder_create") return { ...plan, fields: enrichReminderFields(env, text, plan.fields ?? {}, existingAction) };
+  if (plan.kind === "booking_create") {
+    return { ...plan, fields: await enrichBookingFields(env, config, chatId, text, client, plan.fields ?? {}, existingAction) };
+  }
+  return { ...plan, fields: enrichProfileFields(text, plan.fields ?? {}) };
+}
+
+async function fallbackReminderPlan(env: Env, text: string): Promise<AgentActionPlan & { kind: "reminder_create" }> {
+  const fields = enrichReminderFields(env, text, {});
+  return {
+    kind: "reminder_create",
+    confidence: 0.9,
+    summary: "Создать напоминание по сообщению клиента",
+    fields
+  };
+}
+
+async function fallbackBookingPlan(
+  env: Env,
+  config: BotConfig,
+  chatId: string,
+  text: string,
+  client: ClientSummary,
+  existingAction?: PendingAction
+): Promise<AgentActionPlan & { kind: "booking_create" }> {
+  const fields = await enrichBookingFields(env, config, chatId, text, client, {}, existingAction);
+  return {
+    kind: "booking_create",
+    confidence: 0.9,
+    summary: "Создать запись по сообщению клиента",
+    fields
+  };
+}
+
+function fallbackProfilePlan(text: string): AgentActionPlan & { kind: "profile_update" } {
+  const fields = enrichProfileFields(text, {});
+  return {
+    kind: "profile_update",
+    confidence: 0.9,
+    summary: "Добавить информацию в профиль клиента",
+    fields
+  };
+}
+
+function enrichReminderFields(env: Env, text: string, current: Record<string, unknown>, existingAction?: PendingAction): Record<string, unknown> {
+  const fields = { ...current };
+  const repeat = repeatFromText(text);
+  const dueAt = buildReminderDueAt(text, repeat || repeatField(fields.repeat), env.TIMEZONE || "Europe/Moscow");
+  const reminderText = extractReminderText(text);
+  if (!stringField(fields.text) && reminderText) fields.text = reminderText;
+  if (!stringField(fields.dueAt) && dueAt) fields.dueAt = dueAt;
+  if (!stringField(fields.timezone)) fields.timezone = env.TIMEZONE || "Europe/Moscow";
+  if (!stringField(fields.repeat)) fields.repeat = repeat || repeatField(existingAction?.fields.repeat) || "none";
+  return fields;
+}
+
+async function enrichBookingFields(
+  env: Env,
+  config: BotConfig,
+  chatId: string,
+  text: string,
+  client: ClientSummary,
+  current: Record<string, unknown>,
+  existingAction?: PendingAction
+): Promise<Record<string, unknown>> {
+  const fields = { ...current };
+  const parsedDate = parseRequestedDateKey(text);
+  const parsedTime = parseClockTime(text);
+  const parsedDuration = parseDurationMinutes(text);
+  const existingStartsAt = existingAction ? bookingStartsAt(existingAction.fields) : undefined;
+  const existingDuration = existingAction ? numberField(existingAction.fields.durationMinutes) : undefined;
+  const hasPreviousSessions = clientHasSessions(client);
+  const duration = parsedDuration ?? numberField(fields.durationMinutes) ?? existingDuration ?? (await suggestedDurationForChat(env, chatId));
+
+  if (!stringField(fields.startsAt) && !stringField(fields.date) && !existingStartsAt) fields.date = parsedDate ?? todayDateKey();
+  else if (!stringField(fields.date) && parsedDate) fields.date = parsedDate;
+  if (!stringField(fields.startsAt) && !stringField(fields.time) && parsedTime) fields.time = parsedTime;
+  if (!numberField(fields.durationMinutes)) fields.durationMinutes = duration;
+  if (!stringField(fields.serviceId)) fields.serviceId = serviceIdForBooking(config, text, duration, hasPreviousSessions);
+  return fields;
+}
+
+function enrichProfileFields(text: string, current: Record<string, unknown>): Record<string, unknown> {
+  const fields = { ...current };
+  const currentProfile = profileField(fields.profile);
+  const fact = extractProfileFact(text);
+  if (!stringList(fields.tags).length) fields.tags = ["профиль"];
+  if (!currentProfile.facts?.length && fact) {
+    fields.profile = { ...currentProfile, facts: [fact] };
+  }
+  return fields;
+}
+
+function hasReminderIntent(text: string): boolean {
+  return /(напомн|напоминалк|напоминание|будильник)/i.test(text);
+}
+
+function hasBookingIntent(text: string): boolean {
+  return /(запиши|записать|записаться|забронируй|забронировать|бронь|забронь|поставь\s+(?:встреч|при[её]м)|хочу\s+(?:на\s+)?(?:при[её]м|консультац|запис))/i.test(text);
+}
+
+function hasProfileUpdateIntent(text: string): boolean {
+  return /(запомни|сохрани|добавь\s+(?:в\s+)?(?:профил|карточк|памят)|внеси\s+(?:в\s+)?(?:профил|карточк|памят))/i.test(text);
+}
+
+function repeatFromText(text: string): "none" | "daily" | "weekly" | "monthly" | undefined {
+  const normalized = normalizeRu(text);
+  if (/кажд[ыи]й\s+день|ежедневн|каждое\s+утро|каждый\s+вечер/.test(normalized)) return "daily";
+  if (/кажд[уюа]?\s+недел|еженедельн/.test(normalized)) return "weekly";
+  if (/кажд[ыи]й\s+месяц|ежемесячн/.test(normalized)) return "monthly";
+  if (/один\s+раз|разово|единоразово/.test(normalized)) return "none";
+  return undefined;
+}
+
+function buildReminderDueAt(text: string, repeat: string, timezone: string): string | undefined {
+  const time = parseClockTime(text);
+  if (!time) return undefined;
+  const date = parseRequestedDateKey(text) ?? todayDateKey(timezone);
+  return `${date}T${time}:00+03:00`;
+}
+
+function extractReminderText(text: string): string | undefined {
+  const normalized = text
+    .replace(/^.*?(?:напомни(?:ть)?|напоминание|напоминалку|напоминалка|будильник)\s*(?:мне|меня)?\s*/iu, "")
+    .replace(/\bкажд[ыи]й\s+день\b/giu, "")
+    .replace(/\bежедневно\b/giu, "")
+    .replace(/\bкажд[уюа]?\s+неделю\b/giu, "")
+    .replace(/\bеженедельно\b/giu, "")
+    .replace(/\bкажд[ыи]й\s+месяц\b/giu, "")
+    .replace(/\bежемесячно\b/giu, "")
+    .replace(/(?:^|[\s,.;])(?:в|на|к|с|около)\s+[01]?\d(?::[0-5]\d)?\s*(?:час(?:ов|а)?|ч)?\b/giu, " ")
+    .replace(/(?:^|[\s,.;])(?:в|на|к|с|около)\s+2[0-3](?::[0-5]\d)?\s*(?:час(?:ов|а)?|ч)?\b/giu, " ")
+    .replace(/\b[01]?\d[:.][0-5]\d\b/giu, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^(о\s+том,?\s+что|что)\s+/iu, "")
+    .trim();
+  return normalized.length >= 3 ? normalized.slice(0, 500) : undefined;
+}
+
+function parseRequestedDateKey(text: string): string | undefined {
+  const normalized = normalizeRu(text);
+  const today = todayDateKey();
+  if (/сегодня/.test(normalized)) return today;
+  if (/послезавтра/.test(normalized)) return addDays(today, 2);
+  if (/завтра/.test(normalized)) return addDays(today, 1);
+  const weekday = [
+    { index: 1, pattern: /понед|пн\b/ },
+    { index: 2, pattern: /вторн|вт\b/ },
+    { index: 3, pattern: /сред|ср\b/ },
+    { index: 4, pattern: /четвер|чт\b/ },
+    { index: 5, pattern: /пятниц|пт\b/ },
+    { index: 6, pattern: /суббот|сб\b/ },
+    { index: 0, pattern: /воскрес|вскр|вс\b/ }
+  ].find((item) => item.pattern.test(normalized));
+  if (weekday) return nextWeekdayDateKey(today, weekday.index);
+  const numericDate = normalized.match(/\b(\d{1,2})[.\-/](\d{1,2})(?:[.\-/](\d{2,4}))?\b/);
+  if (!numericDate) return undefined;
+  const day = Number(numericDate[1]);
+  const month = Number(numericDate[2]);
+  const currentYear = Number(today.slice(0, 4));
+  const rawYear = numericDate[3] ? Number(numericDate[3]) : currentYear;
+  const year = rawYear < 100 ? 2000 + rawYear : rawYear;
+  const candidate = dateKeyFromParts(year, month, day);
+  if (!candidate) return undefined;
+  return numericDate[3] || candidate >= today ? candidate : dateKeyFromParts(year + 1, month, day);
+}
+
+function parseClockTime(text: string): string | undefined {
+  const normalized = normalizeRu(text);
+  const exact = normalized.match(/(?:^|[^\d])([01]?\d|2[0-3])[:.]([0-5]\d)(?!\d)/);
+  if (exact) return hhmm(exact[1], exact[2]);
+  const hourWord = normalized.match(/(?:^|[^\d])([01]?\d|2[0-3])\s*(?:час(?:ов|а)?|ч)\b/);
+  if (hourWord) return hhmm(hourWord[1], "00");
+  const prefixed = normalized.match(/(?:^|[\s,.;])(?:в|на|к|с|около)\s+([01]?\d|2[0-3])(?:[:.]([0-5]\d)|\s*(?:час(?:ов|а)?|ч)\b|\b(?!\s*мин))/);
+  return prefixed ? hhmm(prefixed[1], prefixed[2] ?? "00") : undefined;
+}
+
+function parseDurationMinutes(text: string): number | undefined {
+  const normalized = normalizeRu(text);
+  if (/полчас/.test(normalized)) return 30;
+  const minutes = normalized.match(/\b(\d{1,3})\s*[- ]?(?:мин|минут)\b/);
+  if (minutes) return clampDuration(Number(minutes[1]));
+  const hours = normalized.match(/\b(?:длительность|на)\s+(\d{1,2})\s*(?:час|ч)\b/);
+  if (hours) return clampDuration(Number(hours[1]) * 60);
+  return undefined;
+}
+
+function serviceIdForBooking(config: BotConfig, text: string, durationMinutes: number, hasPreviousSessions: boolean): string | undefined {
+  const normalized = normalizeRu(text);
+  const introRequested = /пробн|знаком|бесплатн|вводн|первичн/.test(normalized);
+  const freeServiceIds = new Set(config.prices.filter((price) => price.amount === 0).map((price) => price.serviceId));
+  const introService =
+    config.services.find((service) => freeServiceIds.has(service.id)) ??
+    config.services.find((service) => /intro|знаком|пробн|бесплатн|первичн/i.test(`${service.id} ${service.title} ${service.description}`));
+  const durationService = config.services.find((service) => service.durationMinutes === durationMinutes);
+  const consultationService =
+    config.services.find((service) => /consult|консультац/i.test(`${service.id} ${service.title}`)) ?? config.services.find((service) => !freeServiceIds.has(service.id));
+  if (introRequested || !hasPreviousSessions) return introService?.id ?? durationService?.id;
+  return durationService?.id ?? consultationService?.id ?? introService?.id;
+}
+
+function clientHasSessions(client: ClientSummary): boolean {
+  return Boolean(client.agentProfile.sessionHistory.length || client.manualProfile.sessionHistory.length);
+}
+
+function extractProfileFact(text: string): string | undefined {
+  const cleaned = text
+    .replace(/^(?:запомни|сохрани|добавь\s+(?:в\s+)?(?:профиль|карточку|память)|внеси\s+(?:в\s+)?(?:профиль|карточку|память))[:,\s]*/iu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned.length >= 3 ? cleaned.slice(0, 500) : undefined;
 }
 
 function toPendingAction(plan: AgentActionPlan, originalText: string, existing?: PendingAction): PendingAction {
@@ -372,6 +624,37 @@ function dateKey(value: string): string {
 function addDays(date: string, days: number): string {
   const timestamp = Date.parse(`${date}T12:00:00+03:00`) + days * 24 * 60 * 60 * 1000;
   return dateKey(new Date(timestamp).toISOString());
+}
+
+function todayDateKey(_timezone = "Europe/Moscow"): string {
+  return dateKey(new Date().toISOString());
+}
+
+function nextWeekdayDateKey(today: string, weekdayIndex: number): string {
+  const todayIndex = new Date(`${today}T12:00:00+03:00`).getUTCDay();
+  const delta = (weekdayIndex - todayIndex + 7) % 7;
+  return addDays(today, delta);
+}
+
+function dateKeyFromParts(year: number, month: number, day: number): string | undefined {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return undefined;
+  if (year < 2020 || year > 2100 || month < 1 || month > 12 || day < 1 || day > 31) return undefined;
+  const candidate = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  const parsed = new Date(`${candidate}T12:00:00+03:00`);
+  return dateKey(parsed.toISOString()) === candidate ? candidate : undefined;
+}
+
+function hhmm(hour: string, minute: string): string {
+  return `${String(Number(hour)).padStart(2, "0")}:${String(Number(minute || "0")).padStart(2, "0")}`;
+}
+
+function clampDuration(value: number): number | undefined {
+  if (!Number.isFinite(value) || value < 5 || value > 240) return undefined;
+  return Math.round(value);
+}
+
+function normalizeRu(value: string): string {
+  return value.toLowerCase().replace(/ё/g, "е");
 }
 
 function safe(value: string): string {
