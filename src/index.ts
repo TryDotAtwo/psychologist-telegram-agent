@@ -11,10 +11,10 @@ import {
 import { appendClientMemoryMarkdown, buildClientConversationContext, refreshClientMemoryProfile, shouldRefreshClientMemoryProfile } from "./client_memory";
 import { ChatMemory, memoryStub } from "./memory";
 import { answerWithOpenAI } from "./openai";
-import { processDueReminders } from "./reminders";
+import { handleReminderFollowUpResponse, processDueReminders } from "./reminders";
 import { appendStoredJsonl, mergedProfile, readConfig, readUsers, upsertClient } from "./storage";
 import { formatAvailability, sendTelegramChatAction, sendTelegramMessage } from "./telegram";
-import type { ClientSummary, Env, TelegramUpdate } from "./types";
+import type { BotConfig, ClientSummary, Env, TelegramUpdate } from "./types";
 
 type ConversationContext = { profile: unknown; turns: { role: string; text: string; createdAt: string }[] };
 type DayRequest = { label: string; fromIso: string; toIso: string };
@@ -109,7 +109,15 @@ async function handleText(incoming: RecordedIncomingText, env: Env, ctx: Executi
   const durableContext = (await memory.fetch("https://memory/context").then((response) => response.json())) as ConversationContext;
   const context = await buildClientConversationContext(env, chatId, baseClient, durableContext);
 
-  if (isBotPaused(baseClient)) {
+  let answer = "";
+  let keyboard: string[][] | undefined;
+  const reminderFollowUp = await handleReminderFollowUpResponse(env, chatId, text);
+  if (reminderFollowUp?.handled) {
+    answer = reminderFollowUp.answer;
+    keyboard = reminderFollowUp.keyboard;
+  }
+
+  if (!answer && isBotPaused(baseClient)) {
     await appendStoredJsonl(env, "logs/manual_handoff_suppressed.jsonl", {
       chatId,
       text: text.slice(0, 500),
@@ -119,19 +127,18 @@ async function handleText(incoming: RecordedIncomingText, env: Env, ctx: Executi
     return;
   }
 
-  let answer: string;
-  let keyboard: string[][] | undefined;
-  const actionFlow = await handleAgentActionFlow(env, config, chatId, text, baseClient, context);
-  if (actionFlow?.handled) {
-    answer = actionFlow.answer;
-    keyboard = actionFlow.keyboard;
-  } else {
+  if (!answer) {
+    const actionFlow = await handleAgentActionFlow(env, config, chatId, text, baseClient, context);
+    if (actionFlow?.handled) {
+      answer = actionFlow.answer;
+      keyboard = actionFlow.keyboard;
+    } else {
     const dayRequest = parseAvailabilityDayRequest(text, env.TIMEZONE || "Europe/Moscow");
   if (/^(\/start|старт)$/i.test(text)) {
     answer =
       "Здравствуйте. Я помогу с записью, ценами и базовой навигацией по консультациям. Можно написать: свободные окна, цены, записаться или связаться с психологом.";
   } else if (/^(цены|прайс)$/i.test(text)) {
-    answer = config.prices.map((price) => `${price.serviceId}: ${price.amount} ${price.currency}; ${price.note}`).join("\n");
+    answer = config.prices.map((price) => `${serviceTitleById(config, price.serviceId)}: ${price.amount} ${price.currency}; ${price.note}`).join("\n");
   } else if (isHumanContactRequest(text)) {
     const botPausedUntil = new Date(Date.now() + CLIENT_HANDOFF_MS).toISOString();
     await upsertClient(env, {
@@ -173,7 +180,7 @@ async function handleText(incoming: RecordedIncomingText, env: Env, ctx: Executi
           modalDurationMinutes: held.durationMinutes
         }
       });
-      answer = formatHeldBooking(held);
+      answer = formatHeldBooking(held, config);
     } else {
       answer = "Окно уже занято или не найдено. Напишите «свободные окна», чтобы получить актуальный список.";
     }
@@ -194,6 +201,7 @@ async function handleText(incoming: RecordedIncomingText, env: Env, ctx: Executi
       });
     }
     }
+  }
   }
 
   const answeredAt = new Date().toISOString();
@@ -314,7 +322,7 @@ function cleanAssistantHtml(value: string): string {
   return stripped.replace(/[&<>]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[char] ?? char);
 }
 
-function formatHeldBooking(booking: { startsAt: string; endsAt: string }): string {
+function formatHeldBooking(booking: { startsAt: string; endsAt: string; durationMinutes?: number }, config: BotConfig): string {
   const start = new Date(booking.startsAt);
   const end = new Date(booking.endsAt);
   const day = new Intl.DateTimeFormat("ru-RU", {
@@ -333,5 +341,15 @@ function formatHeldBooking(booking: { startsAt: string; endsAt: string }): strin
     minute: "2-digit",
     timeZone: "Europe/Moscow"
   }).format(end);
-  return `Готово. Окно временно удержано: ${day}, ${time}-${endTime}. Психолог подтвердит запись.`;
+  const serviceName = serviceTitleByDuration(config, booking.durationMinutes);
+  return `Готово. Окно временно удержано.\n\nУслуга: ${serviceName}\nКогда: ${day}, ${time}-${endTime}.\nПсихолог подтвердит запись.`;
+}
+
+function serviceTitleById(config: BotConfig, serviceId: string): string {
+  return config.services.find((service) => service.id === serviceId)?.title || serviceId;
+}
+
+function serviceTitleByDuration(config: BotConfig, durationMinutes?: number): string {
+  if (!durationMinutes) return "Консультация";
+  return config.services.find((service) => service.durationMinutes === durationMinutes)?.title || "Консультация";
 }

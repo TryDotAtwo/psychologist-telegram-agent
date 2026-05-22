@@ -40,7 +40,7 @@ export async function handleAgentActionFlow(
   await upsertClient(env, { chatId, pendingAction: pending });
   return {
     handled: true,
-    answer: formatPendingAction(pending),
+    answer: formatPendingAction(pending, config),
     keyboard: pending.missingFields.length ? CORRECTION_KEYBOARD : CONFIRM_KEYBOARD
   };
 }
@@ -56,7 +56,7 @@ async function handlePendingAction(
   const existingAction = client.pendingAction;
   if (!existingAction) return { handled: false, answer: "" };
   const normalized = text.trim().toLowerCase();
-  if (isPositive(normalized)) return executePendingAction(env, chatId, existingAction);
+  if (isPositive(normalized)) return executePendingAction(env, config, chatId, existingAction);
   if (isNegative(normalized)) {
     await upsertClient(env, { chatId, pendingAction: undefined });
     return { handled: true, answer: "Ок, действие отменено." };
@@ -82,12 +82,12 @@ async function handlePendingAction(
   await upsertClient(env, { chatId, pendingAction: pending });
   return {
     handled: true,
-    answer: formatPendingAction(pending),
+    answer: formatPendingAction(pending, config),
     keyboard: pending.missingFields.length ? CORRECTION_KEYBOARD : CONFIRM_KEYBOARD
   };
 }
 
-async function executePendingAction(env: Env, chatId: string, action: PendingAction): Promise<ActionFlowResult> {
+async function executePendingAction(env: Env, config: BotConfig, chatId: string, action: PendingAction): Promise<ActionFlowResult> {
   if (action.missingFields.length) {
     return {
       handled: true,
@@ -96,7 +96,7 @@ async function executePendingAction(env: Env, chatId: string, action: PendingAct
     };
   }
   if (action.kind === "reminder_create") return executeReminderAction(env, chatId, action);
-  if (action.kind === "booking_create") return executeBookingAction(env, chatId, action);
+  if (action.kind === "booking_create") return executeBookingAction(env, config, chatId, action);
   return executeProfileAction(env, chatId, action);
 }
 
@@ -121,16 +121,16 @@ async function executeReminderAction(env: Env, chatId: string, action: PendingAc
   });
   if (!reminder) return { handled: true, answer: "Не удалось создать напоминание. Проверьте дату и время, затем попробуйте еще раз." };
   const medicationLine = medicationName ? `\nПрепарат: ${safe(medicationName)}` : "";
-  return { handled: true, answer: `Готово. Напоминание создано.\n\nТип: ${medicationName ? "прием препарата" : "обычное напоминание"}${medicationLine}\nТекст: ${safe(text)}\nКогда: ${safe(repeatLabel(repeat))}\nПервый раз: ${safe(humanDateTime(reminder.dueAt))}` };
+  return { handled: true, answer: `Готово. Напоминание создано.\n\nТип: ${medicationName ? "прием препарата" : "обычное напоминание"}${medicationLine}\nТекст: ${safe(text)}\nКогда: ${safe(repeatLabel(repeat))}\nПервый раз: ${safe(humanDateTime(reminder.dueAt))}\nПроверка выполнения: буду ждать «Сделано»; если ответа не будет, повторю через 5 минут.` };
 }
 
-async function executeBookingAction(env: Env, chatId: string, action: PendingAction): Promise<ActionFlowResult> {
+async function executeBookingAction(env: Env, config: BotConfig, chatId: string, action: PendingAction): Promise<ActionFlowResult> {
   const startsAt = bookingStartsAt(action.fields);
   const durationMinutes = numberField(action.fields.durationMinutes);
   if (!startsAt || !durationMinutes) {
     const pending = { ...action, missingFields: missing(action.fields, action.kind), updatedAt: new Date().toISOString() };
     await upsertClient(env, { chatId, pendingAction: pending });
-    return { handled: true, answer: formatPendingAction(pending), keyboard: CORRECTION_KEYBOARD };
+    return { handled: true, answer: formatPendingAction(pending, config), keyboard: CORRECTION_KEYBOARD };
   }
   const dayStart = dateKey(startsAt);
   const availability = await listAvailability(env, `${dayStart}T00:00:00+03:00`, `${addDays(dayStart, 1)}T00:00:00+03:00`, durationMinutes, 200);
@@ -154,15 +154,17 @@ async function executeBookingAction(env: Env, chatId: string, action: PendingAct
     status: "booked"
   });
   if (!booking) return { handled: true, answer: "Не получилось записать: окно уже занято. Напишите другое время.", keyboard: CORRECTION_KEYBOARD };
+  const serviceId = stringField(action.fields.serviceId);
+  const serviceName = serviceTitle(config, serviceId, booking.durationMinutes);
   await upsertClient(env, {
     chatId,
     pendingAction: undefined,
     agentProfile: {
-      sessionHistory: [{ startsAt: booking.startsAt, durationMinutes: booking.durationMinutes, serviceId: stringField(action.fields.serviceId) }],
+      sessionHistory: [{ startsAt: booking.startsAt, durationMinutes: booking.durationMinutes, serviceId }],
       modalDurationMinutes: booking.durationMinutes
     }
   });
-  return { handled: true, answer: `Готово. Запись создана.\n\nКогда: ${safe(humanDateTime(booking.startsAt))}\nДлительность: ${booking.durationMinutes} минут.` };
+  return { handled: true, answer: `Готово. Запись создана.\n\nУслуга: ${safe(serviceName)}\nКогда: ${safe(humanDateTime(booking.startsAt))}\nДлительность: ${booking.durationMinutes} минут.` };
 }
 
 async function executeProfileAction(env: Env, chatId: string, action: PendingAction): Promise<ActionFlowResult> {
@@ -509,6 +511,13 @@ function serviceIdForBooking(config: BotConfig, text: string, durationMinutes: n
   return durationService?.id ?? consultationService?.id ?? introService?.id;
 }
 
+function serviceTitle(config: BotConfig | undefined, serviceId: string | undefined, durationMinutes?: number): string {
+  const service =
+    (serviceId ? config?.services.find((item) => item.id === serviceId) : undefined) ??
+    (durationMinutes ? config?.services.find((item) => item.durationMinutes === durationMinutes) : undefined);
+  return service?.title || serviceId || "Консультация";
+}
+
 function clientHasSessions(client: ClientSummary): boolean {
   return Boolean(client.agentProfile.sessionHistory.length || client.manualProfile.sessionHistory.length);
 }
@@ -537,7 +546,7 @@ function toPendingAction(plan: AgentActionPlan, originalText: string, existing?:
   };
 }
 
-function formatPendingAction(action: PendingAction): string {
+function formatPendingAction(action: PendingAction, config?: BotConfig): string {
   const lines = [`Понял задачу: ${safe(actionTitle(action.kind))}.`];
   if (action.kind === "reminder_create") {
     const reminderDueAt = normalizeDueAt(action.fields.dueAt, repeatField(action.fields.repeat)) || stringField(action.fields.dueAt) || "";
@@ -549,11 +558,13 @@ function formatPendingAction(action: PendingAction): string {
     lines.push(`Текст: ${safe(normalizeReminderText(stringField(action.fields.text) || "") || "не указан")}`);
     lines.push(`Повтор: ${safe(repeatLabel(repeatField(action.fields.repeat)))}`);
     lines.push(`Первый раз: ${safe(humanDateTime(reminderDueAt)) || "не указано"}`);
+    lines.push("Проверка выполнения: после напоминания буду ждать подтверждение; без подтверждения повторю через 5 минут.");
   } else if (action.kind === "booking_create") {
     lines.push("", "Что будет сделано:");
     lines.push(`Дата и время: ${safe(humanDateTime(bookingStartsAt(action.fields) || "") || "не указано")}`);
     lines.push(`Длительность: ${numberField(action.fields.durationMinutes) || "не указана"} минут`);
-    if (stringField(action.fields.serviceId)) lines.push(`Тип: ${safe(stringField(action.fields.serviceId) as string)}`);
+    const serviceId = stringField(action.fields.serviceId);
+    if (serviceId) lines.push(`Услуга: ${safe(serviceTitle(config, serviceId, numberField(action.fields.durationMinutes)))}`);
   } else {
     lines.push("", "Что будет добавлено в профиль:");
     lines.push(...formatProfileFields(action.fields));

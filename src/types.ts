@@ -159,6 +159,7 @@ export type ClientSummary = {
 export type ReminderStatus = "scheduled" | "sent" | "cancelled" | "failed";
 export type ReminderSource = "agent" | "admin";
 export type ReminderRepeat = "none" | "daily" | "weekly" | "monthly";
+export type ReminderAckStatus = "pending" | "confirmed" | "disabled";
 
 export type ClientReminder = {
   id: string;
@@ -169,6 +170,11 @@ export type ClientReminder = {
   status: ReminderStatus;
   source: ReminderSource;
   repeat?: ReminderRepeat;
+  ackRequired?: boolean;
+  ackStatus?: ReminderAckStatus;
+  ackIntervalMinutes?: number;
+  scheduledFor?: string;
+  acknowledgedAt?: string;
   sentCount?: number;
   createdAt: string;
   updatedAt: string;
