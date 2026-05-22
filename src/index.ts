@@ -155,12 +155,12 @@ async function handleText(update: TelegramUpdate, env: Env, ctx: ExecutionContex
     try {
       answer = await answerWithOpenAI(env, config, text, context);
     } catch (error) {
-      answer = localAssistantFallback(config, text);
       await appendStoredJsonl(env, "logs/ai_errors.jsonl", {
         chatId,
         message: error instanceof Error ? error.message : String(error),
         createdAt: new Date().toISOString()
       });
+      throw error;
     }
   }
 
@@ -282,29 +282,6 @@ function localDateKey(date: Date, timezone: string): string {
 function addDays(dateKey: string, days: number): string {
   const timestamp = Date.parse(`${dateKey}T12:00:00+03:00`) + days * 24 * 60 * 60 * 1000;
   return localDateKey(new Date(timestamp), "Europe/Moscow");
-}
-
-function localAssistantFallback(config: BotConfig, text: string): string {
-  if (/цен|прайс|стоим|сколько/i.test(text)) {
-    return config.prices.map((price) => `${price.serviceId}: ${price.amount} ${price.currency}; ${price.note}`).join("\n");
-  }
-  if (/самоуб|суицид|умереть|убить себя|навредить себе|не хочу жить/i.test(text)) {
-    return "Я не могу заменить экстренную помощь. Если есть риск причинить вред себе или сейчас небезопасно, пожалуйста, сразу позвоните в экстренную службу, обратитесь к врачу или к человеку рядом. Если можете, напишите психологу здесь коротко: «нужна срочная помощь».";
-  }
-  if (/тревог|паник|страшно|накрывает|дышать|сердце|дрож/i.test(text)) {
-    return [
-      "Похоже, сейчас тревожно. Можно сделать короткий шаг прямо сейчас:",
-      "1. Поставьте обе стопы на пол и назовите 5 предметов вокруг.",
-      "2. Сделайте 4 спокойных выдоха длиннее вдоха: вдох на 3 счета, выдох на 5 счетов.",
-      "3. Напишите одной фразой: что именно тревожит сильнее всего?",
-      "",
-      "Я не ставлю диагноз и не заменяю психолога. Если нужна живая помощь, нажмите «Связаться с психологом»."
-    ].join("\n");
-  }
-  if (/привет|здравствуй|как дела|что делаешь/i.test(text)) {
-    return "Я на связи. Можно написать, что беспокоит, попросить свободные окна для записи или нажать «Связаться с психологом», если нужен ответ специалиста.";
-  }
-  return "Я понял сообщение. Могу помочь с записью, ценами и первичной навигацией. Если нужен ответ специалиста, нажмите «Связаться с психологом» или напишите, что важно передать психологу.";
 }
 
 function mergeRisk(current: ClientRiskLevel | undefined, next: ClientRiskLevel | undefined): ClientRiskLevel {

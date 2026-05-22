@@ -7,7 +7,6 @@ type ContextPayload = {
 
 type OpenRouterPayload = {
   model?: string;
-  models?: string[];
   messages: { role: "system" | "user"; content: string }[];
   tools?: unknown;
   temperature: number;
@@ -24,8 +23,10 @@ type OpenRouterResponse = {
   }[];
 };
 
-const ANSWER_TIMEOUT_MS = 12_000;
-const EXTRACTION_TIMEOUT_MS = 6_000;
+const ANSWER_TIMEOUT_MS = 28_000;
+const EXTRACTION_TIMEOUT_MS = 10_000;
+const ANSWER_MODEL_TIMEOUT_MS = 4_000;
+const EXTRACTION_MODEL_TIMEOUT_MS = 2_000;
 const OPENROUTER_DEFAULT_MODEL = "deepseek/deepseek-v4-flash:free";
 const OPENROUTER_FINAL_ROUTER = "openrouter/free";
 const OPENROUTER_FREE_FALLBACK_MODELS = [
@@ -89,7 +90,7 @@ export async function answerWithOpenAI(env: Env, config: BotConfig, userText: st
 
 export async function extractClientProfilePatch(env: Env, config: BotConfig, userText: string, context: ContextPayload): Promise<ClientExtraction | null> {
   if (!env.OPENROUTER_API_KEY) return heuristicExtraction(userText, env.TIMEZONE || "Europe/Moscow");
-  const payload: OpenRouterPayload = withOpenRouterFallbackModels(env, {
+  const payload: OpenRouterPayload = {
     messages: [
       {
         role: "system",
@@ -112,10 +113,10 @@ export async function extractClientProfilePatch(env: Env, config: BotConfig, use
     ],
     temperature: 0.1,
     max_tokens: 600
-  });
+  };
 
   try {
-    const content = await completeOpenRouter(env, payload, EXTRACTION_TIMEOUT_MS);
+    const content = await completeOpenRouterWithModelFallbacks(env, payload, EXTRACTION_TIMEOUT_MS, EXTRACTION_MODEL_TIMEOUT_MS);
     return sanitizeExtraction(JSON.parse(stripJsonFences(content)) as ClientExtraction, env.TIMEZONE || "Europe/Moscow");
   } catch {
     return heuristicExtraction(userText, env.TIMEZONE || "Europe/Moscow");
@@ -124,7 +125,7 @@ export async function extractClientProfilePatch(env: Env, config: BotConfig, use
 
 async function answerWithOpenRouter(env: Env, config: BotConfig, userText: string, context: ContextPayload): Promise<string> {
   const tools = config.searchEnabled && shouldUseWebSearch(userText) ? [{ type: "openrouter:web_search", parameters: { max_results: 3 } }] : undefined;
-  const payload: OpenRouterPayload = withOpenRouterFallbackModels(env, {
+  const payload: OpenRouterPayload = {
     messages: [
       {
         role: "system",
@@ -142,26 +143,21 @@ async function answerWithOpenRouter(env: Env, config: BotConfig, userText: strin
     tools,
     temperature: 0.4,
     max_tokens: 520
-  });
+  };
 
   try {
-    return await completeOpenRouter(env, payload, ANSWER_TIMEOUT_MS);
+    return await completeOpenRouterWithModelFallbacks(env, payload, ANSWER_TIMEOUT_MS, ANSWER_MODEL_TIMEOUT_MS);
   } catch (error) {
     if (!tools) throw error;
-    return completeOpenRouter(env, { ...payload, tools: undefined }, ANSWER_TIMEOUT_MS);
+    return completeOpenRouterWithModelFallbacks(env, { ...payload, tools: undefined }, ANSWER_TIMEOUT_MS, ANSWER_MODEL_TIMEOUT_MS);
   }
-}
-
-function withOpenRouterFallbackModels(env: Env, payload: Omit<OpenRouterPayload, "model" | "models">): OpenRouterPayload {
-  const models = openRouterModelCandidates(env, true);
-  if (models.length === 1) return { ...payload, model: models[0] };
-  return { ...payload, models };
 }
 
 export function openRouterModelCandidates(env: Pick<Env, "OPENROUTER_MODEL">, rotateFallbacks = false): string[] {
   const configured = env.OPENROUTER_MODEL?.trim() || OPENROUTER_DEFAULT_MODEL;
+  const primary = configured === OPENROUTER_FINAL_ROUTER ? OPENROUTER_DEFAULT_MODEL : configured;
   const fallbackModels = rotateFallbacks ? rotateModels(OPENROUTER_FREE_FALLBACK_MODELS) : OPENROUTER_FREE_FALLBACK_MODELS;
-  return [...new Set([configured, ...fallbackModels, OPENROUTER_FINAL_ROUTER])];
+  return [...new Set([primary, ...fallbackModels, OPENROUTER_FINAL_ROUTER])];
 }
 
 function rotateModels(models: string[]): string[] {
@@ -178,6 +174,21 @@ function randomIndex(maxExclusive: number): number {
   } catch {
     return Date.now() % maxExclusive;
   }
+}
+
+async function completeOpenRouterWithModelFallbacks(env: Env, payload: OpenRouterPayload, totalTimeoutMs: number, modelTimeoutMs: number): Promise<string> {
+  const startedAt = Date.now();
+  const errors: string[] = [];
+  for (const model of openRouterModelCandidates(env, true)) {
+    const remainingMs = totalTimeoutMs - (Date.now() - startedAt);
+    if (remainingMs <= 0) break;
+    try {
+      return await completeOpenRouter(env, { ...payload, model }, Math.min(modelTimeoutMs, remainingMs));
+    } catch (error) {
+      errors.push(`${model}: ${error instanceof Error ? error.message : String(error)}`.slice(0, 220));
+    }
+  }
+  throw new Error(`openrouter_all_models_failed; attempts=${errors.join(" | ").slice(0, 1200)}`);
 }
 
 async function completeOpenRouter(env: Env, payload: OpenRouterPayload, timeoutMs: number): Promise<string> {
