@@ -28,7 +28,6 @@ npm run dev
 npx wrangler secret put TELEGRAM_BOT_TOKEN
 npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
 npx wrangler secret put ADMIN_TOKEN
-npx wrangler secret put ADMIN_PASSWORD
 npx wrangler secret put OPENROUTER_API_KEY
 npx wrangler secret put GOOGLE_CLIENT_ID
 npx wrangler secret put GOOGLE_CLIENT_SECRET
@@ -39,7 +38,10 @@ npx wrangler secret put GOOGLE_ADMIN_EMAIL
 
 ```powershell
 npx wrangler secret put OPENAI_API_KEY
+npx wrangler secret put GOOGLE_ADMIN_EMAILS
 ```
+
+`GOOGLE_ADMIN_EMAIL` хранит основной Google-аккаунт администратора. `GOOGLE_ADMIN_EMAILS` хранит дополнительные разрешенные email через запятую или пробел. Парольный вход в дашборд отключен; браузерный вход работает через Google OAuth allowlist.
 
 ## GitHub Actions Deploy
 
@@ -60,7 +62,7 @@ Workflow `.github/workflows/deploy.yml` деплоит Worker после push в
 
 ## Safety
 
-- Admin routes require cookie session or bearer token.
+- Admin routes require Google OAuth cookie session or bearer token for operational automation.
 - Telegram webhook requires `X-Telegram-Bot-Api-Secret-Token`.
 - Client transcripts and profiles are stored in R2/Durable Objects.
 - The bot must not diagnose, promise treatment, or replace emergency help.

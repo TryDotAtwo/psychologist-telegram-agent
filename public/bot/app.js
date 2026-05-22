@@ -44,6 +44,7 @@ const sectionMeta = {
 initTheme();
 setupStaticHandlers();
 setupGoogleLinks();
+showLoginStatusFromQuery();
 checkSession();
 
 function headers() {
@@ -155,19 +156,19 @@ function setupGoogleLinks() {
   document.getElementById("connectGoogleLink").href = href;
 }
 
-function setupStaticHandlers() {
-  document.getElementById("loginForm").onsubmit = async (event) => {
-    event.preventDefault();
-    loginStatus.textContent = "Проверка пароля...";
-    try {
-      await api("/api/login", { method: "POST", body: JSON.stringify({ password: document.getElementById("adminPassword").value }) });
-      document.getElementById("adminPassword").value = "";
-      await load();
-    } catch {
-      loginStatus.textContent = "Пароль не подошел.";
-    }
+function showLoginStatusFromQuery() {
+  const google = new URLSearchParams(location.search).get("google");
+  if (!google || !loginStatus) return;
+  const messages = {
+    connected: "Google-вход выполнен. Загружаю кабинет...",
+    not_configured: "Google-вход еще не настроен.",
+    email_not_allowed: "Этот Google-аккаунт не добавлен в доступ.",
+    invalid_state: "Сессия входа устарела. Нажмите «Войти через Google» еще раз."
   };
+  loginStatus.textContent = messages[google] || `Google-вход не выполнен: ${google}`;
+}
 
+function setupStaticHandlers() {
   document.getElementById("logout").onclick = async () => {
     await api("/api/logout", { method: "POST", body: "{}" });
     stopRealtimeRefresh();

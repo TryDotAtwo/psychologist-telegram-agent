@@ -1,4 +1,4 @@
-import { getGoogleAccessToken, googleOAuthConfigured, readGoogleTokens } from "./google";
+import { allowedGoogleEmails, getGoogleAccessToken, googleOAuthConfigured, readGoogleTokens } from "./google";
 import { buildAvailability } from "./calendar_core";
 import type { BusyRange } from "./calendar_core";
 import { appStateStub } from "./memory";
@@ -101,7 +101,7 @@ export async function calendarConnectionStatus(env: Env): Promise<{ configured: 
   const missing = [];
   if (!env.GOOGLE_CLIENT_ID) missing.push("GOOGLE_CLIENT_ID");
   if (!env.GOOGLE_CLIENT_SECRET) missing.push("GOOGLE_CLIENT_SECRET");
-  if (!env.GOOGLE_ADMIN_EMAIL) missing.push("GOOGLE_ADMIN_EMAIL");
+  if (!allowedGoogleEmails(env).length) missing.push("GOOGLE_ADMIN_EMAIL or GOOGLE_ADMIN_EMAILS");
   const tokens = await readGoogleTokens(env);
   return {
     configured: googleOAuthConfigured(env),

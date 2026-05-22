@@ -12,7 +12,19 @@ const TOKEN_KEY = "auth/google_tokens.json";
 const SCOPE = "openid email profile https://www.googleapis.com/auth/calendar.events";
 
 export function googleOAuthConfigured(env: Env): boolean {
-  return Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET && env.GOOGLE_ADMIN_EMAIL);
+  return Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET && allowedGoogleEmails(env).length);
+}
+
+export function allowedGoogleEmails(env: Env): string[] {
+  return [...new Set([env.GOOGLE_ADMIN_EMAIL ?? "", env.GOOGLE_ADMIN_EMAILS ?? ""]
+    .join(",")
+    .split(/[\s,;]+/)
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean))];
+}
+
+export function googleEmailAllowed(env: Env, email: string | null | undefined): boolean {
+  return Boolean(email && allowedGoogleEmails(env).includes(email.toLowerCase()));
 }
 
 export function googleRedirectUri(request: Request): string {
@@ -57,7 +69,7 @@ export async function handleGoogleCallback(request: Request, env: Env): Promise<
   if (!tokenResponse.ok) return { ok: false, error: `token_status_${tokenResponse.status}` };
   const tokenData = (await tokenResponse.json()) as { access_token: string; refresh_token?: string; expires_in?: number };
   const email = await readGoogleEmail(tokenData.access_token);
-  if (!email || email.toLowerCase() !== (env.GOOGLE_ADMIN_EMAIL ?? "").toLowerCase()) {
+  if (!email || !googleEmailAllowed(env, email)) {
     return { ok: false, error: "email_not_allowed" };
   }
   const previous = await readGoogleTokens(env);

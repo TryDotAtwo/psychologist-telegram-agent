@@ -218,6 +218,7 @@ export type Env = {
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
   GOOGLE_ADMIN_EMAIL?: string;
+  GOOGLE_ADMIN_EMAILS?: string;
   TIMEZONE: string;
   PUBLIC_BOT_NAME: string;
 };

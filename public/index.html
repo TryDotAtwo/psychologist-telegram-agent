@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>НейроПсихолог Telegram-бот</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='10' fill='%2300877f'/%3E%3Ctext x='32' y='43' font-size='34' text-anchor='middle' fill='white'%3E%CE%A8%3C/text%3E%3C/svg%3E" />
-    <link rel="stylesheet" href="./styles.css?v=20260522-3" />
+    <link rel="stylesheet" href="./styles.css?v=20260522-4" />
   </head>
   <body>
     <main class="login-screen" id="loginScreen">
@@ -15,12 +15,7 @@
           <div><b>НейроПсихолог</b><small>панель управления Telegram-ботом</small></div>
         </div>
         <h1>Вход в кабинет</h1>
-        <p>Пароль открывает дашборд. Google-вход подключает календарь психолога для записи клиентов.</p>
-        <form id="loginForm" class="login-form">
-          <input class="visually-hidden" type="text" autocomplete="username" value="admin" aria-hidden="true" tabindex="-1" />
-          <input id="adminPassword" type="password" autocomplete="current-password" placeholder="Пароль администратора" aria-label="Пароль администратора" />
-          <button type="submit">Войти</button>
-        </form>
+        <p>Доступ открыт только разрешенным Google-аккаунтам. Google-вход одновременно подключает календарь психолога для записи клиентов.</p>
         <a class="google-login" id="loginGoogleLink" href="/api/auth/google">Войти через Google</a>
         <p id="loginStatus" class="hint"></p>
       </section>
@@ -266,6 +261,6 @@
         <p id="saveStatus" class="save-status">Данные не загружены.</p>
       </section>
     </main>
-    <script src="./app.js?v=20260522-3"></script>
+    <script src="./app.js?v=20260522-4"></script>
   </body>
 </html>

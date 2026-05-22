@@ -1,6 +1,6 @@
 import { calendarConnectionStatus, createBooking, listAvailability, syncGoogleCalendarCache, visibleBusyRanges } from "./calendar";
 import { appendClientMemoryMarkdown, refreshClientMemoryProfile } from "./client_memory";
-import { createGoogleAuthUrl, handleGoogleCallback } from "./google";
+import { createGoogleAuthUrl, googleOAuthConfigured, handleGoogleCallback } from "./google";
 import { memoryStub } from "./memory";
 import { answerWithOpenAI, openRouterModelCandidates } from "./openai";
 import { cancelReminder, createReminder, sendReminderNow, updateReminder } from "./reminders";
@@ -283,17 +283,9 @@ function normalizeList(values: string[] | undefined): string[] {
 }
 
 async function login(request: Request, env: Env): Promise<Response> {
-  const body = (await request.json()) as { password?: string };
-  const expectedPassword = env.ADMIN_PASSWORD || env.ADMIN_TOKEN;
-  if (!body.password || body.password !== expectedPassword) return Response.json({ error: "invalid_password" }, { status: 401 });
-  return Response.json(
-    { ok: true },
-    {
-      headers: {
-        "Set-Cookie": `${SESSION_COOKIE}=${env.ADMIN_TOKEN}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=604800`
-      }
-    }
-  );
+  await request.arrayBuffer();
+  void env;
+  return Response.json({ error: "password_login_disabled" }, { status: 410 });
 }
 
 function logout(): Response {
@@ -309,7 +301,7 @@ function logout(): Response {
 
 async function startGoogleLogin(request: Request, env: Env): Promise<Response> {
   const prefix = request.headers.get("X-Dashboard-Prefix") ?? "";
-  if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET || !env.GOOGLE_ADMIN_EMAIL) {
+  if (!googleOAuthConfigured(env)) {
     return Response.redirect(`${new URL(request.url).origin}${prefix}/?google=not_configured`, 302);
   }
   return Response.redirect(await createGoogleAuthUrl(request, env), 302);
