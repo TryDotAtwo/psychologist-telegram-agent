@@ -551,13 +551,13 @@ textarea:focus, input:focus, select:focus {
 .calendar-board {
   min-height: 560px;
   display: grid;
-  grid-template-columns: repeat(7, minmax(128px, 1fr));
+  grid-template-columns: repeat(7, minmax(168px, 1fr));
   border: 1px solid var(--line);
   border-radius: 8px;
   overflow: auto;
   background: var(--surface);
 }
-.day-column { min-width: 128px; border-right: 1px solid var(--line); }
+.day-column { min-width: 168px; border-right: 1px solid var(--line); }
 .day-column:last-child { border-right: 0; }
 .day-column header {
   position: sticky;
@@ -581,12 +581,28 @@ textarea:focus, input:focus, select:focus {
   display: grid;
   gap: 4px;
   width: 100%;
+  min-width: 0;
   text-align: left;
   border-left: 4px solid var(--teal);
   background: var(--surface-soft);
+  overflow: hidden;
 }
 .slot-card.busy { border-left-color: var(--coral); background: rgba(217, 91, 80, 0.1); }
-.slot-card small { color: var(--muted); font-size: 12px; }
+.slot-card span {
+  display: block;
+  min-width: 0;
+  line-height: 1.18;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+.slot-card small {
+  display: block;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
 .slot-editor { display: grid; gap: 12px; align-content: start; }
 
 .toggle {
@@ -661,7 +677,7 @@ td input:focus { background: var(--surface); border-color: var(--teal); }
     overflow: visible;
   }
   .grid, .metric-row, .summary-strip, .schedule-grid, .override-row, .reminder-form-grid { grid-template-columns: 1fr; }
-  .calendar-board { grid-template-columns: repeat(7, minmax(150px, 1fr)); }
+  .calendar-board { grid-template-columns: repeat(7, minmax(160px, 1fr)); }
   table, thead, tbody, tr, th, td { display: block; }
   thead { display: none; }
   tr { border-bottom: 1px solid var(--line); padding: 8px 0; }

@@ -101,7 +101,8 @@ async function executePendingAction(env: Env, chatId: string, action: PendingAct
 }
 
 async function executeReminderAction(env: Env, chatId: string, action: PendingAction): Promise<ActionFlowResult> {
-  const text = stringField(action.fields.text);
+  const text = normalizeReminderText(stringField(action.fields.text) || "");
+  const medicationName = stringField(action.fields.medicationName) || extractMedicationName(text);
   const repeat = repeatField(action.fields.repeat);
   const dueAt = normalizeDueAt(action.fields.dueAt, repeat);
   if (!text || !dueAt) {
@@ -113,10 +114,14 @@ async function executeReminderAction(env: Env, chatId: string, action: PendingAc
   await upsertClient(env, {
     chatId,
     pendingAction: undefined,
-    agentProfile: { reminders: [`${text}; ${repeatLabel(repeat)}; первый раз ${humanDateTime(dueAt)}`] }
+    agentProfile: {
+      reminders: [`${text}; ${repeatLabel(repeat)}; первый раз ${humanDateTime(dueAt)}`],
+      medications: medicationName ? [`Клиент попросил напоминание о препарате: ${medicationName}`] : []
+    }
   });
   if (!reminder) return { handled: true, answer: "Не удалось создать напоминание. Проверьте дату и время, затем попробуйте еще раз." };
-  return { handled: true, answer: `Готово. Напоминание создано.\n\nТекст: ${safe(text)}\nКогда: ${safe(repeatLabel(repeat))}\nПервый раз: ${safe(humanDateTime(reminder.dueAt))}` };
+  const medicationLine = medicationName ? `\nПрепарат: ${safe(medicationName)}` : "";
+  return { handled: true, answer: `Готово. Напоминание создано.\n\nТип: ${medicationName ? "прием препарата" : "обычное напоминание"}${medicationLine}\nТекст: ${safe(text)}\nКогда: ${safe(repeatLabel(repeat))}\nПервый раз: ${safe(humanDateTime(reminder.dueAt))}` };
 }
 
 async function executeBookingAction(env: Env, chatId: string, action: PendingAction): Promise<ActionFlowResult> {
@@ -259,7 +264,15 @@ function enrichReminderFields(env: Env, text: string, current: Record<string, un
   const repeat = repeatFromText(text);
   const dueAt = buildReminderDueAt(text, repeat || repeatField(fields.repeat), env.TIMEZONE || "Europe/Moscow");
   const reminderText = extractReminderText(text);
-  if (!stringField(fields.text) && reminderText) fields.text = reminderText;
+  const normalizedText = normalizeReminderText(stringField(fields.text) || reminderText || "");
+  const medicationName = stringField(fields.medicationName) || extractMedicationName(normalizedText) || extractMedicationName(text);
+  if (normalizedText) fields.text = medicationName ? normalizeReminderText(replaceMedicationName(normalizedText, medicationName)) : normalizedText;
+  if (medicationName) {
+    fields.medicationName = medicationName;
+    fields.reminderKind = "medication";
+  } else if (!stringField(fields.reminderKind)) {
+    fields.reminderKind = "general";
+  }
   if (!stringField(fields.dueAt) && dueAt) fields.dueAt = dueAt;
   if (!stringField(fields.timezone)) fields.timezone = env.TIMEZONE || "Europe/Moscow";
   if (!stringField(fields.repeat)) fields.repeat = repeat || repeatField(existingAction?.fields.repeat) || "none";
@@ -348,6 +361,85 @@ function extractReminderText(text: string): string | undefined {
     .replace(/^(о\s+том,?\s+что|что)\s+/iu, "")
     .trim();
   return normalized.length >= 3 ? normalized.slice(0, 500) : undefined;
+}
+
+function normalizeReminderText(value: string): string {
+  const trimmed = value
+    .replace(/\s+/g, " ")
+    .replace(/\s+([,.;:!?])/g, "$1")
+    .replace(/\bкажд[ыи]й\s+день\b/giu, "")
+    .replace(/\bежедневно\b/giu, "")
+    .replace(/\bкажд[уюа]?\s+неделю\b/giu, "")
+    .replace(/\bеженедельно\b/giu, "")
+    .replace(/\bкажд[ыи]й\s+месяц\b/giu, "")
+    .replace(/\bежемесячно\b/giu, "")
+    .replace(/(?:^|[\s,.;])(?:в|на|к|с|около)\s+(?:[01]?\d|2[0-3])(?::[0-5]\d)?\s*(?:час(?:ов|а)?|ч)?\b/giu, " ")
+    .replace(/\bкажди[йи]\b/giu, "каждый")
+    .replace(/\bкаждии\b/giu, "каждый")
+    .replace(/\bкаждуюю\b/giu, "каждую")
+    .replace(/\bдулокситин\b/giu, "Дулоксетин")
+    .replace(/\bдулоксетин\b/giu, "Дулоксетин")
+    .trim();
+  if (!trimmed) return "";
+  const medicationName = extractMedicationName(trimmed);
+  const withMedication = medicationName ? replaceMedicationName(trimmed, medicationName) : trimmed;
+  return `${withMedication[0].toLocaleUpperCase("ru-RU")}${withMedication.slice(1)}`.slice(0, 500);
+}
+
+function extractMedicationName(value: string): string | undefined {
+  const normalized = value
+    .replace(/\s+/g, " ")
+    .replace(/\b(каждый|каждую|ежедневно|еженедельно|ежемесячно|сегодня|завтра|послезавтра)\b.*$/iu, "")
+    .trim();
+  const match = normalized.match(
+    /(?:\bпить\b|\bвыпить\b|\bпринять\b|\bпринимать\b|\bлекарство\b|\bпрепарат\b|\bтаблетк[ауи]?\b)\s+([A-Za-zА-Яа-яЁё][A-Za-zА-Яа-яЁё0-9-]{2,}(?:\s+[A-Za-zА-Яа-яЁё][A-Za-zА-Яа-яЁё0-9-]{2,}){0,2})/iu
+  );
+  const raw = (match?.[1] || "")
+    .replace(/\b(?:в|на|к|с|около)\s+\d{1,2}(?::\d{2})?\b.*$/iu, "")
+    .replace(/[.,;:!?]+$/u, "")
+    .trim();
+  return raw ? normalizeMedicationName(raw) : undefined;
+}
+
+function replaceMedicationName(text: string, medicationName: string): string {
+  const escaped = medicationName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const known = knownMedicationPattern(medicationName);
+  const pattern = known ?? new RegExp(escaped, "iu");
+  if (pattern.test(text)) return text.replace(pattern, medicationName);
+  return text;
+}
+
+function normalizeMedicationName(value: string): string {
+  const normalized = normalizeRu(value).replace(/[^a-zа-я0-9- ]/giu, "").trim();
+  const known: { name: string; pattern: RegExp }[] = [
+    { name: "Дулоксетин", pattern: /дулокс[еи]тин|duloxetin|duloxetine/i },
+    { name: "Сертралин", pattern: /сертралин|sertraline/i },
+    { name: "Эсциталопрам", pattern: /эсциталопрам|escitalopram/i },
+    { name: "Флуоксетин", pattern: /флуоксетин|fluoxetine/i },
+    { name: "Венлафаксин", pattern: /венлафаксин|venlafaxine/i },
+    { name: "Атомоксетин", pattern: /атомоксетин|atomoxetine/i },
+    { name: "Ламотриджин", pattern: /ламотриджин|lamotrigine/i },
+    { name: "Кветиапин", pattern: /кветиапин|quetiapine/i }
+  ];
+  const found = known.find((item) => item.pattern.test(normalized));
+  if (found) return found.name;
+  return value
+    .split(/\s+/)
+    .map((part) => (part ? `${part[0].toLocaleUpperCase("ru-RU")}${part.slice(1).toLocaleLowerCase("ru-RU")}` : ""))
+    .join(" ")
+    .slice(0, 120);
+}
+
+function knownMedicationPattern(medicationName: string): RegExp | undefined {
+  if (medicationName === "Дулоксетин") return /дулокс[еи]тин|duloxetin|duloxetine/iu;
+  if (medicationName === "Сертралин") return /сертралин|sertraline/iu;
+  if (medicationName === "Эсциталопрам") return /эсциталопрам|escitalopram/iu;
+  if (medicationName === "Флуоксетин") return /флуоксетин|fluoxetine/iu;
+  if (medicationName === "Венлафаксин") return /венлафаксин|venlafaxine/iu;
+  if (medicationName === "Атомоксетин") return /атомоксетин|atomoxetine/iu;
+  if (medicationName === "Ламотриджин") return /ламотриджин|lamotrigine/iu;
+  if (medicationName === "Кветиапин") return /кветиапин|quetiapine/iu;
+  return undefined;
 }
 
 function parseRequestedDateKey(text: string): string | undefined {
@@ -444,8 +536,12 @@ function formatPendingAction(action: PendingAction): string {
   const lines = [`Понял задачу: ${safe(actionTitle(action.kind))}.`];
   if (action.kind === "reminder_create") {
     const reminderDueAt = normalizeDueAt(action.fields.dueAt, repeatField(action.fields.repeat)) || stringField(action.fields.dueAt) || "";
+    const medicationName = stringField(action.fields.medicationName);
+    const reminderKind = stringField(action.fields.reminderKind);
     lines.push("", "Что будет сделано:");
-    lines.push(`Текст: ${safe(stringField(action.fields.text) || "не указан")}`);
+    lines.push(`Тип: ${medicationName || reminderKind === "medication" ? "напоминание о препарате" : "обычное напоминание"}`);
+    if (medicationName) lines.push(`Препарат: ${safe(medicationName)}`);
+    lines.push(`Текст: ${safe(normalizeReminderText(stringField(action.fields.text) || "") || "не указан")}`);
     lines.push(`Повтор: ${safe(repeatLabel(repeatField(action.fields.repeat)))}`);
     lines.push(`Первый раз: ${safe(humanDateTime(reminderDueAt)) || "не указано"}`);
   } else if (action.kind === "booking_create") {

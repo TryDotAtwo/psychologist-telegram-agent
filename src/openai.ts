@@ -78,6 +78,8 @@ export async function extractAgentActionPlan(
     "Если действие найдено, верни только JSON без markdown.",
     "Не исполняй действие сам. Только предложи структурированные поля для последующего подтверждения программой.",
     "Для напоминаний о лекарствах записывай только текст клиента, не добавляй дозировки и медицинские инструкции от себя.",
+    "Для reminder_create исправляй очевидные орфографические ошибки в тексте напоминания без изменения смысла.",
+    "Если reminder_create относится к приему препарата, заполни fields.reminderKind=\"medication\" и fields.medicationName названием препарата; если не относится, fields.reminderKind=\"general\".",
     "Для записи используй ISO-дату со смещением +03:00, если дата и время понятны. Если не хватает даты, времени или длительности, перечисли недостающие поля.",
     "Если клиент просит запись и указывает время без дня, используй сегодняшний день в timezone.",
     "Если клиент просит запись без длительности, верни durationMinutes=null: программа подставит бесплатное знакомство для нового клиента или модальную длительность прошлых встреч для возвращающегося клиента.",
@@ -90,7 +92,7 @@ export async function extractAgentActionPlan(
     `memory_context=${JSON.stringify(context).slice(0, 20_000)}`,
     `existing_pending_action=${JSON.stringify(pendingAction ?? null)}`,
     "JSON schema: {\"kind\":\"none|reminder_create|booking_create|profile_update\",\"confidence\":0..1,\"summary\":string,\"missingFields\":string[],\"fields\":{}}",
-    "reminder_create.fields={\"text\":string,\"dueAt\":ISO8601|null,\"timezone\":string,\"repeat\":\"none|daily|weekly|monthly\"}",
+    "reminder_create.fields={\"text\":string,\"dueAt\":ISO8601|null,\"timezone\":string,\"repeat\":\"none|daily|weekly|monthly\",\"reminderKind\":\"general|medication\",\"medicationName\":string|null}",
     "booking_create.fields={\"startsAt\":ISO8601|null,\"date\":\"YYYY-MM-DD|null\",\"time\":\"HH:mm|null\",\"durationMinutes\":number|null,\"serviceId\":string|null,\"note\":string|null}",
     "profile_update.fields={\"tags\":string[],\"profile\":{\"facts\":string[],\"medications\":string[],\"doctors\":string[],\"appointments\":string[],\"problems\":string[],\"preferences\":string[],\"riskNotes\":string[],\"reminders\":string[]},\"riskLevel\":\"none|watch|urgent\",\"nextAction\":string|null}"
   ].join("\n");
