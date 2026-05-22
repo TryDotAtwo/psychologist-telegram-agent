@@ -7,6 +7,8 @@ type ContextPayload = {
 
 type OpenRouterPayload = {
   model?: string;
+  models?: string[];
+  route?: "fallback";
   messages: { role: "system" | "user"; content: string }[];
   tools?: unknown;
   temperature: number;
@@ -180,10 +182,11 @@ async function completeOpenRouterWithModelFallbacks(env: Env, payload: OpenRoute
   const startedAt = Date.now();
   const timeoutMs = Math.min(modelTimeoutMs, totalTimeoutMs);
   const controllers: AbortController[] = [];
-  const attempts = openRouterModelCandidates(env, true).map((model) => {
+  const attempts = chunk(openRouterModelCandidates(env, true), 3).map((models) => {
     const controller = new AbortController();
+    const routePayload = models.length > 1 ? { ...payload, model: undefined, models, route: "fallback" as const } : { ...payload, model: models[0], models: undefined };
     controllers.push(controller);
-    return completeOpenRouter(env, { ...payload, model }, timeoutMs, controller.signal)
+    return completeOpenRouter(env, routePayload, timeoutMs, controller.signal)
       .then((text) => {
         controllers.forEach((item) => {
           if (item !== controller) item.abort();
@@ -191,7 +194,7 @@ async function completeOpenRouterWithModelFallbacks(env: Env, payload: OpenRoute
         return text;
       })
       .catch((error) => {
-        throw new Error(`${model}: ${error instanceof Error ? error.message : String(error)}`.slice(0, 240));
+        throw new Error(`${models.join(" -> ")}: ${error instanceof Error ? error.message : String(error)}`.slice(0, 320));
       });
   });
   try {
@@ -203,6 +206,14 @@ async function completeOpenRouterWithModelFallbacks(env: Env, payload: OpenRoute
   } finally {
     controllers.forEach((controller) => controller.abort());
   }
+}
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const result: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    result.push(items.slice(index, index + size));
+  }
+  return result;
 }
 
 async function completeOpenRouter(env: Env, payload: OpenRouterPayload, timeoutMs: number, signal?: AbortSignal): Promise<string> {
