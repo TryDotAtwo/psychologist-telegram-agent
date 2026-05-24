@@ -609,17 +609,17 @@ p { margin: 6px 0 0; color: var(--muted); line-height: 1.45; }
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--chat-canvas);
-  scroll-behavior: smooth;
+  scroll-behavior: auto;
   scrollbar-gutter: stable;
 }
 .jump-bottom {
   position: absolute;
-  right: 34px;
-  bottom: 94px;
+  right: 74px;
+  bottom: 118px;
   z-index: 2;
-  width: 34px;
-  height: 34px;
-  min-height: 34px;
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
   padding: 0;
   display: grid;
   place-items: center;
@@ -1098,6 +1098,10 @@ td input:focus { background: var(--surface); border-color: var(--teal); }
     margin-left: -2px;
     margin-right: -2px;
     padding: 12px;
+  }
+  .jump-bottom {
+    right: 64px;
+    bottom: 106px;
   }
   .reply-form { grid-template-columns: minmax(0, 1fr) auto; }
   .reply-input-shell { grid-template-columns: auto minmax(0, 1fr) auto; }

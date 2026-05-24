@@ -28,7 +28,12 @@ const MESSAGE_PAGE_SIZE = 100;
 const DASHBOARD_REFRESH_MS = 3000;
 const MESSAGE_REFRESH_MS = 1600;
 const REPLY_DUPLICATE_WINDOW_MS = 5000;
+const CHAT_SCROLL_SAVE_THROTTLE_MS = 500;
+const CHAT_SCROLL_SAVE_MIN_DELTA = 24;
+const CHAT_SCROLL_RESTORE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 let messageRefreshInFlight = false;
+let programmaticChatScrollUntil = 0;
+const chatScrollStateMemory = new Map();
 let lastReminderComposerClientId = null;
 let attentionNotifyReady = false;
 
@@ -175,7 +180,7 @@ function renderAll() {
   renderUsers();
   renderProfiles();
   renderCalendarStatus();
-  renderClient();
+  renderClient({ skipMessages: !isSectionVisible("clients") });
   renderDetailedProfile();
 }
 
@@ -249,7 +254,7 @@ function setupStaticHandlers() {
   });
   document.getElementById("replyFiles").addEventListener("change", renderReplyAttachments);
   document.getElementById("messageHistory").addEventListener("scroll", handleMessageHistoryScroll);
-  document.getElementById("jumpToBottom").addEventListener("click", () => scrollMessagesToBottom(false));
+  document.getElementById("jumpToBottom").addEventListener("click", () => scrollMessagesToBottom(false, { userSet: true }));
   document.getElementById("scheduleReplyButton").addEventListener("click", chooseScheduledReplyTime);
   document.getElementById("replyScheduleAt").addEventListener("change", syncScheduleButton);
   syncScheduleButton();
@@ -305,7 +310,7 @@ function isSectionVisible(section) {
   return Boolean(panel && !panel.classList.contains("hidden-panel"));
 }
 
-function openSection(section) {
+function openSection(section, options = {}) {
   document.querySelectorAll("nav button").forEach((item) => item.classList.toggle("active", item.dataset.section === section));
   document.querySelectorAll("[data-section-panel]").forEach((panel) => panel.classList.toggle("hidden-panel", panel.dataset.sectionPanel !== section));
   const meta = sectionMeta[section] || sectionMeta.overview;
@@ -316,6 +321,11 @@ function openSection(section) {
   const workspace = document.querySelector(".workspace");
   if (workspace?.scrollTo) workspace.scrollTo({ top: 0, behavior: "smooth" });
   closeMobileDrawer();
+  if (section === "clients" && !options.skipClientRender) {
+    requestAnimationFrame(() => {
+      if (isSectionVisible("clients")) renderClient({ restoreScroll: true, forceScrollImmediate: true });
+    });
+  }
 }
 
 function renderOverview() {
@@ -563,10 +573,10 @@ function attachClientOpenHandlers(root, targetSection = "clients") {
       selectedClientId = button.dataset.clientOpen;
       lastRenderedChatId = null;
       lastMessagesKey = "";
-      openSection(targetSection);
+      openSection(targetSection, { skipClientRender: targetSection === "clients" });
       renderUsers();
       renderProfiles();
-      renderClient({ restoreScroll: true });
+      renderClient({ restoreScroll: true, forceScrollImmediate: true });
       renderDetailedProfile();
     });
   });
@@ -586,7 +596,7 @@ async function renderClient(options = {}) {
   const resumeButton = document.getElementById("resumeBot");
   resumeButton.classList.toggle("hidden", !isBotPaused(user));
   renderConsultBrief(user, profile);
-  if (options.skipMessages) return;
+  if (options.skipMessages || !isSectionVisible("clients")) return;
   renderCachedMessagesImmediately(user.chatId, { restoreScroll: options.restoreScroll ?? true, forceScroll: options.forceScroll });
   renderMessages(user.chatId, { restoreScroll: options.restoreScroll ?? true, forceScroll: options.forceScroll, silent: Boolean(options.silent) }).catch(() => undefined);
 }
@@ -680,7 +690,7 @@ function renderCachedMessagesImmediately(chatId, options = {}) {
   }
   const node = document.getElementById("messageHistory");
   node.innerHTML = `<div class="empty-state">Загружаю последние сообщения...</div>`;
-  lastRenderedChatId = chatId;
+  lastRenderedChatId = null;
   lastMessagesKey = "";
   hideJumpToBottom();
 }
@@ -732,6 +742,8 @@ function renderMessageList(chatId, serverMessages, options = {}) {
   const key = messageListRenderKey(messages);
   if (lastRenderedChatId === chatId && lastMessagesKey === key) {
     if (options.forceScroll) scrollMessagesToBottom(false);
+    else if (options.restoreScroll && restoreChatScrollState(chatId)) updateJumpToBottomState();
+    else if (options.restoreScroll) scrollMessagesToBottom(false);
     else updateJumpToBottomState();
     return;
   }
@@ -747,12 +759,12 @@ function renderMessageList(chatId, serverMessages, options = {}) {
   lastMessagesKey = key;
   if (options.prepend) {
     node.scrollTop = node.scrollHeight - previousScrollHeight + previousScrollTop;
-    saveChatScrollState(chatId);
+    saveChatScrollState(chatId, { userSet: true, force: true });
     updateJumpToBottomState();
   } else if (options.restoreScroll && restoreChatScrollState(chatId)) {
-    saveChatScrollState(chatId);
+    saveChatScrollState(chatId, { userSet: true, force: true });
     updateJumpToBottomState();
-  } else if (shouldFollowBottom) scrollMessagesToBottom(wasSameChat && !options.forceScroll && !options.forceScrollImmediate);
+  } else if (options.restoreScroll || shouldFollowBottom) scrollMessagesToBottom(false);
   else updateJumpToBottomState();
 }
 
@@ -761,7 +773,7 @@ function renderMessagesFromCache(chatId, options = {}) {
 }
 
 function handleMessageHistoryScroll(event) {
-  saveChatScrollState(selectedClientId);
+  if (Date.now() > programmaticChatScrollUntil) saveChatScrollState(selectedClientId, { userSet: true });
   updateJumpToBottomState(event.currentTarget);
   loadOlderMessagesOnScroll(event).catch(() => undefined);
 }
@@ -932,24 +944,39 @@ function isNearBottom(node) {
 
 function readChatScrollState(chatId) {
   if (!chatId) return null;
+  if (chatScrollStateMemory.has(chatId)) return chatScrollStateMemory.get(chatId);
   try {
     const state = JSON.parse(localStorage.getItem(chatScrollKey(chatId)) || "null");
-    return state && typeof state === "object" ? state : null;
+    const value = state && typeof state === "object" ? state : null;
+    if (value) chatScrollStateMemory.set(chatId, value);
+    return value;
   } catch {
     return null;
   }
 }
 
-function saveChatScrollState(chatId) {
+function saveChatScrollState(chatId, options = {}) {
   if (!chatId) return;
   const node = document.getElementById("messageHistory");
   if (!node) return;
+  const now = Date.now();
+  const previous = chatScrollStateMemory.get(chatId) || readChatScrollState(chatId);
+  const next = {
+    scrollTop: Math.max(0, Math.round(node.scrollTop)),
+    wasAtBottom: isNearBottom(node),
+    userSet: Boolean(options.userSet),
+    updatedAt: now
+  };
+  if (!options.force && previous) {
+    const sameZone = previous.wasAtBottom === next.wasAtBottom;
+    const smallMove = Math.abs(Number(previous.scrollTop || 0) - next.scrollTop) < CHAT_SCROLL_SAVE_MIN_DELTA;
+    const tooSoon = now - Number(previous.updatedAt || 0) < CHAT_SCROLL_SAVE_THROTTLE_MS;
+    if (sameZone && smallMove && tooSoon) return;
+  }
+  if (!next.userSet && previous?.userSet && !previous.wasAtBottom && !next.wasAtBottom && !options.force) return;
+  chatScrollStateMemory.set(chatId, next);
   try {
-    localStorage.setItem(chatScrollKey(chatId), JSON.stringify({
-      scrollTop: Math.max(0, Math.round(node.scrollTop)),
-      wasAtBottom: isNearBottom(node),
-      updatedAt: Date.now()
-    }));
+    localStorage.setItem(chatScrollKey(chatId), JSON.stringify(next));
   } catch {
     // Scroll memory is an optional browser-local convenience.
   }
@@ -958,30 +985,42 @@ function saveChatScrollState(chatId) {
 function restoreChatScrollState(chatId) {
   const node = document.getElementById("messageHistory");
   const state = readChatScrollState(chatId);
-  if (!node || !state || state.wasAtBottom || !Number.isFinite(state.scrollTop)) return false;
+  const isFresh = state && Date.now() - Number(state.updatedAt || 0) < CHAT_SCROLL_RESTORE_MAX_AGE_MS;
+  if (!node || !state?.userSet || !isFresh || state.wasAtBottom || !Number.isFinite(state.scrollTop)) return false;
+  programmaticChatScrollUntil = Date.now() + 80;
   node.scrollTop = Math.min(state.scrollTop, Math.max(0, node.scrollHeight - node.clientHeight));
   return true;
 }
 
-function scrollMessagesToBottom(smooth = true) {
+function scrollMessagesToBottom(smooth = false, options = {}) {
   const node = document.getElementById("messageHistory");
   if (!node) return;
+  const targetChatId = selectedClientId;
   const behavior = smooth ? "smooth" : "auto";
+  programmaticChatScrollUntil = Date.now() + 80;
   node.scrollTop = node.scrollHeight;
-  saveChatScrollState(selectedClientId);
+  saveChatScrollState(targetChatId, { userSet: Boolean(options.userSet), force: true });
   updateJumpToBottomState(node);
   requestAnimationFrame(() => {
+    if (targetChatId !== selectedClientId) return;
+    if (!options.userSet && !isNearBottom(node)) return;
     node.scrollTo({ top: node.scrollHeight, behavior });
-    saveChatScrollState(selectedClientId);
+    saveChatScrollState(targetChatId, { userSet: Boolean(options.userSet), force: true });
     updateJumpToBottomState(node);
     setTimeout(() => {
+      if (targetChatId !== selectedClientId) return;
+      if (!options.userSet && !isNearBottom(node)) return;
+      programmaticChatScrollUntil = Date.now() + 80;
       node.scrollTo({ top: node.scrollHeight, behavior: "auto" });
-      saveChatScrollState(selectedClientId);
+      saveChatScrollState(targetChatId, { userSet: Boolean(options.userSet), force: true });
       updateJumpToBottomState(node);
     }, 40);
     setTimeout(() => {
+      if (targetChatId !== selectedClientId) return;
+      if (!options.userSet && !isNearBottom(node)) return;
+      programmaticChatScrollUntil = Date.now() + 80;
       node.scrollTo({ top: node.scrollHeight, behavior: "auto" });
-      saveChatScrollState(selectedClientId);
+      saveChatScrollState(targetChatId, { userSet: Boolean(options.userSet), force: true });
       updateJumpToBottomState(node);
     }, 140);
   });
