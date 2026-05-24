@@ -266,6 +266,10 @@ nav button.active::before {
 .status b { color: var(--teal-dark); }
 .status small { color: var(--muted); line-height: 1.35; }
 .secondary { width: 100%; min-width: 190px; }
+.theme-menu-button {
+  text-align: center;
+  font-weight: 700;
+}
 
 .workspace {
   height: 100vh;
@@ -459,7 +463,7 @@ p { margin: 6px 0 0; color: var(--muted); line-height: 1.45; }
 }
 .chat-panel {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr) auto;
   min-height: 0;
   height: 100%;
   overflow: hidden;
@@ -508,7 +512,17 @@ p { margin: 6px 0 0; color: var(--muted); line-height: 1.45; }
   gap: 12px;
   align-self: start;
 }
-.consult-brief .panel-head { margin-bottom: 0; }
+.consult-brief .panel-head {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  margin-bottom: 0;
+}
+.consult-brief .secondary.small {
+  width: 100%;
+  min-width: 0;
+  white-space: nowrap;
+}
 .brief-stack {
   display: grid;
   gap: 9px;
@@ -540,7 +554,7 @@ p { margin: 6px 0 0; color: var(--muted); line-height: 1.45; }
   flex-direction: column;
   gap: 10px;
   min-height: 0;
-  margin: 12px -4px;
+  margin: 0 -4px 12px;
   padding: 16px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -569,6 +583,16 @@ p { margin: 6px 0 0; color: var(--muted); line-height: 1.45; }
   border-top-right-radius: 6px;
 }
 .message.assistant.admin { background: var(--chat-admin); }
+.message.pending {
+  opacity: 0.88;
+}
+.message.failed {
+  border-color: rgba(217, 91, 80, 0.52);
+}
+.message.scheduled {
+  border-color: rgba(184, 120, 18, 0.45);
+  background: color-mix(in srgb, var(--chat-admin) 75%, var(--surface) 25%);
+}
 .message p {
   color: var(--text);
   margin: 0;
@@ -576,33 +600,165 @@ p { margin: 6px 0 0; color: var(--muted); line-height: 1.45; }
   overflow-wrap: anywhere;
 }
 .message small {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
   margin-top: 5px;
   color: var(--muted);
   font-size: 11px;
   text-align: right;
 }
+.message-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--teal-dark);
+  font-weight: 800;
+  line-height: 1;
+}
+.message-status.failed { color: var(--coral); }
+.message-status.scheduled { color: var(--amber); }
+.message-check.double {
+  letter-spacing: -3px;
+  padding-right: 3px;
+}
+.message-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid color-mix(in srgb, var(--teal) 28%, transparent);
+  border-top-color: var(--teal);
+  border-radius: 50%;
+  animation: spin 0.72s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
 .reply-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
-  gap: 10px;
+  gap: 9px;
   border-top: 1px solid var(--line);
   padding-top: 12px;
 }
-.reply-form textarea {
-  min-height: 44px;
-  max-height: 144px;
-  resize: vertical;
-  border-radius: 14px;
+.reply-input-shell {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(150px, 210px);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--surface);
+  padding: 6px 8px;
 }
-.reply-form button {
+.reply-form textarea {
+  min-height: 38px;
+  max-height: 120px;
+  resize: none;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 8px 2px;
+}
+.reply-form textarea:focus {
+  outline: none;
+  border-color: transparent;
+}
+.attachment-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 10px;
+  color: var(--muted);
+  background: var(--surface);
+  cursor: pointer;
+}
+.attachment-button.icon-only {
+  width: 38px;
+  height: 38px;
+  min-height: 38px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+}
+.attachment-button.icon-only svg {
+  width: 24px;
+  height: 24px;
+  fill: currentColor;
+}
+.attachment-button:hover,
+.attachment-button:focus-within {
+  border-color: var(--teal);
+  color: var(--teal-dark);
+}
+.attachment-button input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+.schedule-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.schedule-field input {
+  min-height: 34px;
+  padding: 6px 8px;
+  border-radius: 12px;
+}
+.attachment-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  grid-column: 1 / -1;
+}
+.attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 9px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 12px;
+}
+.message-attachment-list {
+  margin-bottom: 8px;
+}
+.reply-form .send-button {
   justify-self: end;
-  min-height: 44px;
-  border-radius: 14px;
+  width: 48px;
+  height: 48px;
+  min-height: 48px;
+  padding: 0;
+  border-radius: 999px;
   background: var(--teal);
   border-color: var(--teal);
   color: #fff;
+  display: grid;
+  place-items: center;
+}
+.send-button svg {
+  width: 23px;
+  height: 23px;
+  fill: currentColor;
+  transform: translateX(1px);
 }
 .client-profile { display: grid; gap: 11px; align-content: start; }
 .reminder-composer {
@@ -813,7 +969,7 @@ td input:focus { background: var(--surface); border-color: var(--teal); }
   }
   .app.drawer-open .drawer-backdrop { display: block; }
   .workspace { height: auto; min-height: 100vh; padding: 18px; }
-  .topbar { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .topbar { grid-template-columns: auto minmax(0, 1fr); }
   .topbar-brand-toggle { display: grid; }
   .actions { grid-column: auto; justify-content: flex-end; }
   .consult-brief {
@@ -850,6 +1006,8 @@ td input:focus { background: var(--surface); border-color: var(--teal); }
     margin-right: -2px;
     padding: 12px;
   }
-  .reply-form { grid-template-columns: 1fr; }
-  .reply-form button { width: 100%; }
+  .reply-form { grid-template-columns: minmax(0, 1fr) auto; }
+  .reply-input-shell { grid-template-columns: auto minmax(0, 1fr); }
+  .schedule-field { grid-column: 1 / -1; }
+  .reply-form .send-button { width: 48px; }
 }

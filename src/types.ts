@@ -187,6 +187,28 @@ export type TranscriptMessage = {
   text: string;
   createdAt: string;
   source?: "bot" | "admin" | "telegram";
+  attachments?: OutboundAttachment[];
+};
+
+export type OutboundAttachment = {
+  key?: string;
+  filename: string;
+  mimeType: string;
+  size?: number;
+};
+
+export type ScheduledOutboundMessage = {
+  id: string;
+  chatId: string;
+  text: string;
+  dueAt: string;
+  status: "scheduled" | "sent" | "failed" | "cancelled";
+  source: "admin";
+  attachments: OutboundAttachment[];
+  createdAt: string;
+  updatedAt: string;
+  sentAt?: string;
+  lastError?: string;
 };
 
 export type TelegramMessage = {

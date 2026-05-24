@@ -1,8 +1,13 @@
 import { calendarConnectionStatus, createBooking, listAvailability, syncGoogleCalendarCache, visibleBusyRanges } from "./calendar";
-import { appendClientMemoryMarkdown, refreshClientMemoryProfile } from "./client_memory";
+import { refreshClientMemoryProfile } from "./client_memory";
 import { createGoogleAuthUrl, googleOAuthConfigured, handleGoogleCallback } from "./google";
-import { memoryStub } from "./memory";
 import { answerWithOpenAI, openRouterModelCandidates } from "./openai";
+import {
+  listScheduledOutboundMessages,
+  recordAdminOutbound,
+  scheduleOutboundMessage,
+  storeOutboundAttachment
+} from "./outbound_messages";
 import { cancelReminder, createReminder, sendReminderNow, updateReminder } from "./reminders";
 import {
   appendStoredJsonl,
@@ -18,11 +23,10 @@ import {
   writeConfig,
   writeSchedule
 } from "./storage";
-import { escapeTelegramHtml, getTelegramWebhookInfo, sendTelegramMessage, setTelegramWebhook } from "./telegram";
-import type { BotConfig, ClientSummary, Env, WorkSchedule } from "./types";
+import { escapeTelegramHtml, getTelegramWebhookInfo, sendTelegramMedia, sendTelegramMessage, setTelegramWebhook } from "./telegram";
+import type { BotConfig, ClientSummary, Env, OutboundAttachment, ScheduledOutboundMessage, WorkSchedule } from "./types";
 
 const SESSION_COOKIE = "admin_session";
-const MANUAL_HANDOFF_MS = 24 * 60 * 60 * 1000;
 
 export async function handleAdminApi(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
@@ -44,10 +48,18 @@ export async function handleAdminApi(request: Request, env: Env): Promise<Respon
     const users = await readUsers(env);
     return Response.json(users.map((user) => ({ ...user, mergedProfile: mergedProfile(user) })));
   }
+  if (request.method === "GET" && url.pathname === "/api/outbound-messages") {
+    const messages = await listScheduledOutboundMessages(env, url.searchParams.get("chatId") ?? undefined);
+    return Response.json(messages.map((message) => ({
+      ...message,
+      attachments: message.attachments.map(({ key: _key, ...attachment }) => attachment)
+    })));
+  }
   const userRoute = parseUserRoute(url.pathname);
   if (userRoute && request.method === "GET" && userRoute.action === "messages") return Response.json(await readTranscript(env, userRoute.chatId));
   if (userRoute && request.method === "PUT" && userRoute.action === "profile") return Response.json(await updateUserProfile(request, env, userRoute.chatId));
   if (userRoute && request.method === "POST" && userRoute.action === "reply") return sendAdminReply(request, env, userRoute.chatId);
+  if (userRoute && request.method === "POST" && userRoute.action === "reply-media") return sendAdminMediaReply(request, env, userRoute.chatId);
   if (userRoute && request.method === "POST" && userRoute.action === "bot-resume") return resumeBotForClient(env, userRoute.chatId);
   if (userRoute && request.method === "POST" && userRoute.action === "profile-refresh") return refreshProfileFromDashboard(env, userRoute.chatId);
 
@@ -157,13 +169,15 @@ async function syncTelegramWebhook(request: Request, env: Env): Promise<Record<s
   };
 }
 
-function parseUserRoute(pathname: string): { chatId: string; action: "profile" | "messages" | "reply" | "bot-resume" | "profile-refresh" } | null {
+function parseUserRoute(pathname: string): { chatId: string; action: "profile" | "messages" | "reply" | "reply-media" | "bot-resume" | "profile-refresh" } | null {
   const match = pathname.match(/^\/api\/users\/([^/]+)(?:\/(.+))?$/);
   if (!match) return null;
   const suffix = match[2] ?? "";
   const action =
     suffix === "messages" || suffix === "reply"
       ? suffix
+      : suffix === "reply/media"
+        ? "reply-media"
       : suffix === "bot/resume"
         ? "bot-resume"
         : suffix === "profile/refresh"
@@ -179,6 +193,27 @@ function parseReminderRoute(pathname: string): { id: string; action?: "cancel" |
   const match = pathname.match(/^\/api\/reminders\/([^/]+)(?:\/(cancel|send-now))?$/);
   if (!match) return null;
   return { id: decodeURIComponent(match[1]), action: match[2] as "cancel" | "send-now" | undefined };
+}
+
+function isFutureIso(value: string | undefined): value is string {
+  if (!value) return false;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) && timestamp > Date.now() + 15_000;
+}
+
+function stringFormValue(value: FormDataEntryValue | null): string {
+  return typeof value === "string" ? value : "";
+}
+
+function isSupportedMediaFile(file: File): boolean {
+  return file.type.startsWith("image/") || file.type.startsWith("video/");
+}
+
+function publicOutboundMessage(message: ScheduledOutboundMessage): Omit<ScheduledOutboundMessage, "attachments"> & { attachments: Omit<OutboundAttachment, "key">[] } {
+  return {
+    ...message,
+    attachments: message.attachments.map(({ key: _key, ...attachment }) => attachment)
+  };
 }
 
 async function updateUserProfile(request: Request, env: Env, chatId: string): Promise<ClientSummary> {
@@ -198,10 +233,15 @@ async function updateUserProfile(request: Request, env: Env, chatId: string): Pr
 }
 
 async function sendAdminReply(request: Request, env: Env, chatId: string): Promise<Response> {
-  const body = (await request.json()) as { text?: string };
+  const body = (await request.json()) as { text?: string; scheduledAt?: string };
   const text = body.text?.trim();
   if (!text) return Response.json({ error: "empty_text" }, { status: 400 });
   if (text.length > 3500) return Response.json({ error: "text_too_long" }, { status: 400 });
+  if (isFutureIso(body.scheduledAt)) {
+    const message = await scheduleOutboundMessage(env, { chatId, text, dueAt: body.scheduledAt as string });
+    if (!message) return Response.json({ error: "invalid_scheduled_message" }, { status: 400 });
+    return Response.json({ ok: true, scheduled: true, createdAt: message.createdAt, scheduledAt: message.dueAt, message: publicOutboundMessage(message) });
+  }
   try {
     await sendTelegramMessage(env, chatId, escapeTelegramHtml(text));
   } catch (error) {
@@ -211,31 +251,48 @@ async function sendAdminReply(request: Request, env: Env, chatId: string): Promi
     );
   }
   const createdAt = new Date().toISOString();
-  await appendStoredJsonl(env, `transcripts/${chatId}.jsonl`, { role: "assistant", text, createdAt, source: "admin" });
-  await appendClientMemoryMarkdown(env, chatId, { role: "assistant", text, createdAt, source: "admin" });
-  await memoryStub(env, chatId).fetch("https://memory/turn", {
-    method: "POST",
-    body: JSON.stringify({ role: "assistant", text, createdAt })
-  });
-  const botPausedUntil = new Date(Date.now() + MANUAL_HANDOFF_MS).toISOString();
-  const next = await upsertClient(env, {
-    chatId,
-    lastAssistantText: text,
-    lastMessageAt: createdAt,
-    lastAdminReplyAt: createdAt,
-    attentionAt: createdAt,
-    attentionReason: "manual_dialog_active",
-    botPausedUntil,
-    botPausedBy: "admin",
-    botPausedReason: "manual_admin_reply"
-  });
-  await appendStoredJsonl(env, "logs/manual_handoff_events.jsonl", {
-    chatId,
-    action: "pause",
-    botPausedUntil,
-    createdAt
-  });
-  return Response.json({ ok: true, createdAt, botPausedUntil, client: { ...next, mergedProfile: mergedProfile(next) } });
+  const next = await recordAdminOutbound(env, chatId, text, createdAt);
+  return Response.json({ ok: true, createdAt, botPausedUntil: next.botPausedUntil, client: { ...next, mergedProfile: mergedProfile(next) } });
+}
+
+async function sendAdminMediaReply(request: Request, env: Env, chatId: string): Promise<Response> {
+  const formData = await request.formData();
+  const caption = stringFormValue(formData.get("caption")).trim().slice(0, 1024);
+  const scheduledAt = stringFormValue(formData.get("scheduledAt"));
+  const files = formData.getAll("files").filter((item): item is File => item instanceof File && isSupportedMediaFile(item));
+  if (!files.length) return Response.json({ error: "missing_media" }, { status: 400 });
+  if (isFutureIso(scheduledAt)) {
+    const pendingId = `pending_${crypto.randomUUID()}`;
+    const attachments: OutboundAttachment[] = [];
+    for (const file of files.slice(0, 10)) attachments.push(await storeOutboundAttachment(env, pendingId, file));
+    const message = await scheduleOutboundMessage(env, { chatId, text: caption, dueAt: scheduledAt, attachments });
+    if (!message) return Response.json({ error: "invalid_scheduled_media" }, { status: 400 });
+    return Response.json({ ok: true, scheduled: true, createdAt: message.createdAt, scheduledAt: message.dueAt, message: publicOutboundMessage(message) });
+  }
+  const attachments: OutboundAttachment[] = files.slice(0, 10).map((file) => ({
+    filename: file.name || "media",
+    mimeType: file.type || "application/octet-stream",
+    size: file.size
+  }));
+  try {
+    for (let index = 0; index < files.slice(0, 10).length; index += 1) {
+      const file = files[index];
+      await sendTelegramMedia(env, chatId, {
+        blob: file,
+        filename: file.name || "media",
+        mimeType: file.type || "application/octet-stream",
+        caption: index === 0 ? caption : ""
+      });
+    }
+  } catch (error) {
+    return Response.json(
+      { error: "telegram_media_send_failed", message: error instanceof Error ? error.message : String(error) },
+      { status: 502 }
+    );
+  }
+  const createdAt = new Date().toISOString();
+  const next = await recordAdminOutbound(env, chatId, caption, createdAt, attachments);
+  return Response.json({ ok: true, createdAt, client: { ...next, mergedProfile: mergedProfile(next) }, attachments });
 }
 
 async function resumeBotForClient(env: Env, chatId: string): Promise<Response> {

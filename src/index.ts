@@ -11,6 +11,7 @@ import {
 import { appendClientMemoryMarkdown, buildClientConversationContext, refreshClientMemoryProfile, shouldRefreshClientMemoryProfile } from "./client_memory";
 import { ChatMemory, memoryStub } from "./memory";
 import { answerWithOpenAI } from "./openai";
+import { processScheduledOutboundMessages } from "./outbound_messages";
 import { handleReminderFollowUpResponse, processDueReminders } from "./reminders";
 import { appendStoredJsonl, mergedProfile, readConfig, readUsers, upsertClient } from "./storage";
 import { escapeTelegramHtml, formatAvailability, sendTelegramChatAction, sendTelegramMessage } from "./telegram";
@@ -42,7 +43,7 @@ export default {
   },
 
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    ctx.waitUntil(processDueReminders(env));
+    ctx.waitUntil(Promise.all([processDueReminders(env), processScheduledOutboundMessages(env)]));
   }
 };
 

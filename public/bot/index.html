@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>НейроПсихолог Telegram-бот</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='10' fill='%2300877f'/%3E%3Ctext x='32' y='43' font-size='34' text-anchor='middle' fill='white'%3E%CE%A8%3C/text%3E%3C/svg%3E" />
-    <link rel="stylesheet" href="./styles.css?v=20260524-1" />
+    <link rel="stylesheet" href="./styles.css?v=20260524-2" />
   </head>
   <body>
     <main class="login-screen" id="loginScreen">
@@ -42,6 +42,7 @@
           <b id="sidebarStatus">Бот активен</b>
           <small>Cloudflare Worker + R2 + Google Calendar</small>
         </section>
+        <button id="themeToggle" class="secondary theme-menu-button" type="button">◐ Тема</button>
         <button id="logout" class="secondary">Выйти</button>
       </aside>
 
@@ -49,9 +50,6 @@
         <header class="topbar">
           <button id="mobileDrawerToggle" class="brand-mark brand-toggle topbar-brand-toggle" type="button" aria-label="Открыть меню">Ψ</button>
           <div class="topbar-fill"></div>
-          <div class="actions">
-            <button id="themeToggle" class="icon-button" aria-label="Переключить тему">◐</button>
-          </div>
         </header>
 
         <section class="panel-stack" data-section-panel="overview">
@@ -83,22 +81,26 @@
               <div id="clientList" class="client-list"></div>
             </aside>
             <section class="chat-panel">
-              <div class="chat-head">
-                <div><h2 id="clientName">Клиент не выбран</h2><p id="clientMeta">Выберите диалог слева.</p></div>
-                <div class="chat-actions">
-                  <span id="clientRisk" class="risk none">нет риска</span>
-                  <button id="resumeBot" class="secondary small hidden" type="button">Включить бота</button>
-                </div>
-              </div>
               <div id="messageHistory" class="message-history"></div>
               <form id="replyForm" class="reply-form">
-                <textarea id="replyText" rows="3" placeholder="Ответ психолога. Сообщение уйдет клиенту в Telegram."></textarea>
-                <button type="submit">Отправить через бота</button>
+                <div class="reply-input-shell">
+                  <label class="attachment-button icon-only" title="Прикрепить фото или видео">
+                    <input id="replyFiles" type="file" accept="image/*,video/*" multiple />
+                    <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M8.8 17.8c-1.9 0-3.4-1.5-3.4-3.4 0-.9.4-1.8 1-2.4l7-7c1.4-1.4 3.6-1.4 5 0s1.4 3.6 0 5l-7.4 7.4c-2.1 2.1-5.5 2.1-7.6 0s-2.1-5.5 0-7.6l7.1-7.1 1.4 1.4-7.1 7.1c-1.3 1.3-1.3 3.5 0 4.8s3.5 1.3 4.8 0l7.4-7.4c.6-.6.6-1.6 0-2.2s-1.6-.6-2.2 0l-7 7c-.2.2-.4.6-.4 1 0 .8.6 1.4 1.4 1.4.4 0 .7-.1 1-.4l6.5-6.5 1.4 1.4-6.5 6.5c-.6.6-1.5 1-2.4 1Z"/></svg>
+                  </label>
+                  <textarea id="replyText" rows="1" placeholder="Сообщение..."></textarea>
+                  <label class="schedule-field"><span class="visually-hidden">Отложить</span><input id="replyScheduleAt" type="datetime-local" aria-label="Отложить сообщение" /></label>
+                  <div id="replyAttachmentList" class="attachment-list"></div>
+                </div>
+                <button id="sendReplyButton" class="send-button" type="submit" aria-label="Отправить">
+                  <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3.4 20.4 21 12 3.4 3.6l2 7.1L13 12l-7.6 1.3-2 7.1Z"/></svg>
+                </button>
               </form>
             </section>
             <aside class="consult-brief">
               <div class="panel-head compact-head">
                 <h2>Короткий профиль</h2>
+                <button id="resumeBot" class="secondary small hidden" type="button">Включить бота</button>
               </div>
               <div id="consultBrief" class="brief-stack"></div>
               <button class="brief-details-button" data-section-jump="profiles">Подробно</button>
@@ -261,6 +263,6 @@
         <p id="saveStatus" class="save-status">Данные не загружены.</p>
       </section>
     </main>
-    <script src="./app.js?v=20260524-1"></script>
+    <script src="./app.js?v=20260524-2"></script>
   </body>
 </html>

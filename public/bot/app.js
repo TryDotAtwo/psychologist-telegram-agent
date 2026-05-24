@@ -10,9 +10,11 @@ let selectedAvailabilityId = null;
 let refreshTimer = null;
 let messageRefreshTimer = null;
 let refreshInFlight = false;
-let replyInFlight = false;
+let pendingOutgoingMessages = [];
+const pendingReplyKeys = new Set();
 let lastRenderedChatId = null;
 let lastMessagesKey = "";
+const cachedMessagesByChat = new Map();
 let lastReminderComposerClientId = null;
 let attentionNotifyReady = false;
 
@@ -59,6 +61,13 @@ async function api(path, options = {}) {
   return response.json();
 }
 
+async function apiForm(path, formData) {
+  const target = path.startsWith("/api") ? `${apiBase}${path.slice(4)}` : path;
+  const response = await fetch(target, { method: "POST", body: formData });
+  if (!response.ok) throw new Error(`${path}: HTTP ${response.status}`);
+  return response.json();
+}
+
 async function checkSession() {
   try {
     const session = await api("/api/session");
@@ -97,8 +106,8 @@ async function loadAvailability(duration = 30) {
 
 function startRealtimeRefresh() {
   stopRealtimeRefresh();
-  refreshTimer = setInterval(refreshDashboardData, 2000);
-  messageRefreshTimer = setInterval(refreshSelectedMessages, 1000);
+  refreshTimer = setInterval(refreshDashboardData, 1500);
+  messageRefreshTimer = setInterval(refreshSelectedMessages, 500);
 }
 
 function stopRealtimeRefresh() {
@@ -218,6 +227,7 @@ function setupStaticHandlers() {
       document.getElementById("replyForm").requestSubmit();
     }
   });
+  document.getElementById("replyFiles").addEventListener("change", renderReplyAttachments);
   document.getElementById("resumeBot").onclick = resumeBotForClient;
   document.getElementById("saveClientProfile").onclick = saveClientProfile;
   document.getElementById("refreshClientProfile").onclick = refreshClientProfile;
@@ -230,12 +240,20 @@ function initTheme() {
   const saved = localStorage.getItem("dashboard-theme");
   const theme = saved || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
   document.documentElement.dataset.theme = theme;
+  syncThemeToggle();
 }
 
 function toggleTheme() {
   const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
   document.documentElement.dataset.theme = next;
   localStorage.setItem("dashboard-theme", next);
+  syncThemeToggle();
+}
+
+function syncThemeToggle() {
+  const button = document.getElementById("themeToggle");
+  if (!button) return;
+  button.textContent = document.documentElement.dataset.theme === "dark" ? "☀ Светлая тема" : "◐ Темная тема";
 }
 
 function toggleDrawer(event) {
@@ -477,7 +495,7 @@ function renderUsers() {
   document.getElementById("clientList").innerHTML = visibleUsers.length
     ? visibleUsers.map((user) => `
       <button class="client-row ${user.chatId === selectedClientId ? "selected" : ""}" data-client-open="${escapeAttr(user.chatId)}">
-        <span><b>${escapeHtml(displayClientName(user))}</b><small>${escapeHtml(clientPreviewText(user, user.lastUserText))}</small></span>
+        <span><b>${escapeHtml(displayClientName(user))}</b>${clientManualNoteHtml(user)}</span>
         <span class="row-badges"><time class="row-time">${shortChatTime(user.lastMessageAt)}</time>${attentionPill(user)}<em class="risk ${user.riskLevel}">${riskLabel(user.riskLevel)}</em></span>
       </button>
     `).join("")
@@ -508,7 +526,7 @@ function attachClientOpenHandlers(root, targetSection = "clients") {
       openSection(targetSection);
       renderUsers();
       renderProfiles();
-      renderClient();
+      renderClient({ forceScroll: true });
       renderDetailedProfile();
     });
   });
@@ -517,11 +535,6 @@ function attachClientOpenHandlers(root, targetSection = "clients") {
 async function renderClient(options = {}) {
   const user = users.find((item) => item.chatId === selectedClientId);
   if (!user) {
-    document.getElementById("clientName").textContent = "Клиент не выбран";
-    document.getElementById("clientMeta").textContent = "Выберите диалог слева.";
-    const risk = document.getElementById("clientRisk");
-    risk.textContent = "нет риска";
-    risk.className = "risk none";
     document.getElementById("consultBrief").innerHTML = `<div class="empty-state">Короткая сводка появится после выбора клиента.</div>`;
     document.getElementById("messageHistory").innerHTML = `<div class="empty-state">Выберите клиента слева.</div>`;
     document.getElementById("resumeBot").classList.add("hidden");
@@ -530,16 +543,11 @@ async function renderClient(options = {}) {
     return;
   }
   const profile = mergedProfile(user);
-  document.getElementById("clientName").textContent = displayClientName(user);
-  document.getElementById("clientMeta").textContent = `chat_id=${user.chatId}; сообщений=${user.messageCount}; ${botModeLabel(user)}`;
-  const risk = document.getElementById("clientRisk");
-  risk.textContent = riskLabel(user.riskLevel);
-  risk.className = `risk ${user.riskLevel}`;
   const resumeButton = document.getElementById("resumeBot");
   resumeButton.classList.toggle("hidden", !isBotPaused(user));
   renderConsultBrief(user, profile);
   if (options.skipMessages) return;
-  await renderMessages(user.chatId);
+  await renderMessages(user.chatId, { forceScroll: options.forceScroll });
 }
 
 function renderDetailedProfile() {
@@ -557,7 +565,7 @@ function renderDetailedProfile() {
   }
   const profile = mergedProfile(user);
   document.getElementById("profileClientName").textContent = displayClientName(user);
-  document.getElementById("profileClientMeta").textContent = `chat_id=${user.chatId}; сообщений=${user.messageCount}; память=${profileMemoryLabel(user)}`;
+  document.getElementById("profileClientMeta").textContent = `сообщений=${user.messageCount}; память=${profileMemoryLabel(user)}`;
   const profileRisk = document.getElementById("profileRiskBadge");
   profileRisk.textContent = riskLabel(user.riskLevel);
   profileRisk.className = `risk ${user.riskLevel}`;
@@ -581,7 +589,7 @@ function renderDetailedProfile() {
 function renderConsultBrief(user, profile) {
   const scheduled = reminders.filter((reminder) => reminder.chatId === user.chatId && reminder.status === "scheduled");
   const blocks = [
-    ["Текущая проблема", first(profile.problems) || user.lastUserText || "нет данных", "primary"],
+    ["Текущая проблема", first(profile.problems) || "нет данных", "primary"],
     ["Важные факты", first(profile.facts) || "нет данных"],
     ["Лекарства", first(profile.medications) || "нет данных"],
     ["Врачи", first(profile.doctors) || "нет данных"],
@@ -622,28 +630,120 @@ function summaryChips(profile, user) {
 
 async function renderMessages(chatId, options = {}) {
   try {
-    const messages = await api(`/api/users/${encodeURIComponent(chatId)}/messages`);
+    const [messages, scheduled] = await Promise.all([
+      api(`/api/users/${encodeURIComponent(chatId)}/messages`),
+      api(`/api/outbound-messages?chatId=${encodeURIComponent(chatId)}`).catch(() => [])
+    ]);
     if (chatId !== selectedClientId) return;
-    const key = JSON.stringify(messages);
-    if (lastRenderedChatId === chatId && lastMessagesKey === key) {
-      if (options.forceScroll) scrollMessagesToBottom(false);
-      return;
-    }
-    const node = document.getElementById("messageHistory");
-    node.innerHTML = messages.length
-      ? messages.map((message) => `
-        <article class="message ${messageClass(message)}">
-          <p>${escapeHtml(message.text)}</p>
-          <small>${humanDateTime(message.createdAt)} · ${messageSourceLabel(message)}</small>
-        </article>
-      `).join("")
-      : `<div class="empty-state">История сообщений пока пустая.</div>`;
-    lastRenderedChatId = chatId;
-    lastMessagesKey = key;
-    scrollMessagesToBottom(lastRenderedChatId === chatId && !options.forceScroll);
+    const scheduledMessages = scheduled.map((item) => ({
+      role: "assistant",
+      source: "admin",
+      text: item.text || attachmentSummary(item.attachments),
+      createdAt: item.createdAt,
+      scheduledAt: item.dueAt,
+      status: "scheduled",
+      scheduledId: item.id,
+      attachments: item.attachments || []
+    }));
+    const serverMessages = [...messages, ...scheduledMessages].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+    cachedMessagesByChat.set(chatId, serverMessages);
+    renderMessageList(chatId, serverMessages, options);
   } catch (error) {
     if (!options.silent) document.getElementById("messageHistory").innerHTML = `<div class="empty-state">Не удалось загрузить сообщения.</div>`;
   }
+}
+
+function renderMessageList(chatId, serverMessages, options = {}) {
+  if (chatId !== selectedClientId) return;
+  cleanupConfirmedPending(chatId, serverMessages);
+  const messages = mergePendingMessages(chatId, serverMessages);
+  const key = JSON.stringify(messages.map(messageKeyData));
+  if (lastRenderedChatId === chatId && lastMessagesKey === key) {
+    if (options.forceScroll) scrollMessagesToBottom(false);
+    return;
+  }
+  const node = document.getElementById("messageHistory");
+  const wasSameChat = lastRenderedChatId === chatId;
+  const shouldFollowBottom = options.forceScroll || !wasSameChat || isNearBottom(node);
+  node.innerHTML = messages.length
+    ? messages.map((message, index) => messageHtml(message, messages, index)).join("")
+    : `<div class="empty-state">История сообщений пока пустая.</div>`;
+  lastRenderedChatId = chatId;
+  lastMessagesKey = key;
+  if (shouldFollowBottom) scrollMessagesToBottom(wasSameChat && !options.forceScroll);
+}
+
+function renderMessagesFromCache(chatId, options = {}) {
+  renderMessageList(chatId, cachedMessagesByChat.get(chatId) || [], options);
+}
+
+function mergePendingMessages(chatId, serverMessages) {
+  const pending = pendingOutgoingMessages.filter((message) => message.chatId === chatId);
+  const merged = [...serverMessages];
+  for (const message of pending) {
+    if (message.status === "sent" && hasMatchingServerMessage(serverMessages, message)) continue;
+    if (message.status === "scheduled" && message.scheduledId && serverMessages.some((item) => item.scheduledId === message.scheduledId)) continue;
+    merged.push(message);
+  }
+  return merged.sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+}
+
+function cleanupConfirmedPending(chatId, serverMessages) {
+  pendingOutgoingMessages = pendingOutgoingMessages.filter((message) => {
+    if (message.chatId !== chatId) return true;
+    if (message.status === "sent" && hasMatchingServerMessage(serverMessages, message)) return false;
+    if (message.status === "scheduled" && message.scheduledId && serverMessages.some((item) => item.scheduledId === message.scheduledId)) return false;
+    return true;
+  });
+}
+
+function hasMatchingServerMessage(serverMessages, pending) {
+  return serverMessages.some((message) => {
+    if (message.role !== "assistant" || message.source !== "admin") return false;
+    if ((message.text || "") !== (pending.text || "")) return false;
+    const serverTime = Date.parse(message.createdAt);
+    const pendingTime = Date.parse(pending.serverCreatedAt || pending.createdAt);
+    return Number.isFinite(serverTime) && Number.isFinite(pendingTime) && Math.abs(serverTime - pendingTime) < 90_000;
+  });
+}
+
+function messageHtml(message, messages, index) {
+  return `
+    <article class="message ${messageClass(message)}">
+      ${messageAttachmentsHtml(message)}
+      <p>${escapeHtml(message.text || attachmentSummary(message.attachments))}</p>
+      <small><span>${humanDateTime(message.createdAt)}</span>${messageStatusHtml(message, messages, index)}</small>
+    </article>
+  `;
+}
+
+function messageAttachmentsHtml(message) {
+  const attachments = message.attachments || [];
+  if (!attachments.length) return "";
+  return `<div class="attachment-list message-attachment-list">${attachments.map((item) => `<span class="attachment-chip">${escapeHtml(item.filename || item.name || "файл")}</span>`).join("")}</div>`;
+}
+
+function messageStatusHtml(message, messages, index) {
+  if (message.role !== "assistant") return "";
+  if (message.status === "sending") return `<span class="message-status sending" title="Отправляется"><span class="message-spinner"></span></span>`;
+  if (message.status === "failed") return `<span class="message-status failed" title="${escapeAttr(message.error || "Ошибка отправки")}">!</span>`;
+  if (message.status === "scheduled") return `<span class="message-status scheduled" title="Запланировано на ${escapeAttr(humanDateTime(message.scheduledAt || message.createdAt))}">⏱</span>`;
+  const repliedAt = firstLaterUserReplyTime(messages, index);
+  if (repliedAt) return `<span class="message-status read" title="Клиент ответил после сообщения: ${escapeAttr(humanDateTime(repliedAt))}"><span class="message-check double">✓✓</span><span>${shortChatTime(repliedAt)}</span></span>`;
+  return `<span class="message-status sent" title="Telegram принял сообщение"><span class="message-check">✓</span></span>`;
+}
+
+function firstLaterUserReplyTime(messages, index) {
+  const later = messages.slice(index + 1).find((message) => message.role === "user");
+  return later?.createdAt || "";
+}
+
+function messageKeyData(message) {
+  return [message.localId || message.scheduledId || "", message.role, message.source || "", message.text || "", message.createdAt, message.status || "", message.serverCreatedAt || "", message.scheduledAt || "", attachmentSummary(message.attachments)];
+}
+
+function isNearBottom(node) {
+  return !node || node.scrollHeight - node.scrollTop - node.clientHeight < 96;
 }
 
 function scrollMessagesToBottom(smooth = true) {
@@ -658,24 +758,101 @@ function scrollMessagesToBottom(smooth = true) {
 
 async function sendReply(event) {
   event.preventDefault();
-  if (replyInFlight) return;
+  const filesInput = document.getElementById("replyFiles");
   const text = document.getElementById("replyText").value.trim();
-  if (!selectedClientId || !text) return;
-  const form = document.getElementById("replyForm");
-  const submit = form.querySelector("button[type='submit']");
-  replyInFlight = true;
-  submit.disabled = true;
+  const files = [...(filesInput.files || [])];
+  const scheduledAt = scheduledInputToIso(document.getElementById("replyScheduleAt").value);
+  const chatId = selectedClientId;
+  if (!chatId || (!text && !files.length)) return;
+  const key = pendingReplyKey(chatId, text, files, scheduledAt);
+  if (pendingReplyKeys.has(key)) return;
+  pendingReplyKeys.add(key);
+  const localId = `local_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const optimistic = {
+    localId,
+    chatId,
+    role: "assistant",
+    source: "admin",
+    text,
+    createdAt: new Date().toISOString(),
+    scheduledAt,
+    status: scheduledAt ? "scheduled" : "sending",
+    attachments: files.map(fileToAttachment)
+  };
+  pendingOutgoingMessages.push(optimistic);
+  document.getElementById("replyText").value = "";
+  document.getElementById("replyScheduleAt").value = "";
+  filesInput.value = "";
+  renderReplyAttachments();
+  lastMessagesKey = "";
+  renderMessagesFromCache(chatId, { forceScroll: true });
   try {
-    await api(`/api/users/${encodeURIComponent(selectedClientId)}/reply`, { method: "POST", body: JSON.stringify({ text }) });
-    document.getElementById("replyText").value = "";
+    const result = files.length
+      ? await sendReplyMedia(chatId, text, files, scheduledAt)
+      : await api(`/api/users/${encodeURIComponent(chatId)}/reply`, { method: "POST", body: JSON.stringify({ text, scheduledAt }) });
+    updatePendingOutgoing(localId, {
+      status: result.scheduled ? "scheduled" : "sent",
+      createdAt: result.createdAt || optimistic.createdAt,
+      serverCreatedAt: result.createdAt,
+      scheduledAt: result.scheduledAt || scheduledAt,
+      scheduledId: result.message?.id || result.id
+    });
+    if (result.client) users = users.map((item) => (item.chatId === result.client.chatId ? result.client : item));
     lastMessagesKey = "";
-    await refreshDashboardData(true);
-    await renderMessages(selectedClientId, { forceScroll: true });
-    document.getElementById("saveStatus").textContent = "Ответ отправлен. Бот поставлен на паузу для этого клиента.";
+    renderMessagesFromCache(chatId, { forceScroll: true });
+    refreshDashboardData(true).catch(() => undefined);
+    refreshSelectedMessages().catch(() => undefined);
+    document.getElementById("saveStatus").textContent = result.scheduled ? "Сообщение запланировано." : "Ответ отправлен. Бот поставлен на паузу для этого клиента.";
+  } catch (error) {
+    updatePendingOutgoing(localId, { status: "failed", error: error instanceof Error ? error.message : String(error) });
+    lastMessagesKey = "";
+    renderMessagesFromCache(chatId, { forceScroll: true });
+    document.getElementById("saveStatus").textContent = "Не удалось отправить сообщение в Telegram.";
   } finally {
-    replyInFlight = false;
-    submit.disabled = false;
+    pendingReplyKeys.delete(key);
   }
+}
+
+async function sendReplyMedia(chatId, text, files, scheduledAt) {
+  const formData = new FormData();
+  formData.append("caption", text);
+  if (scheduledAt) formData.append("scheduledAt", scheduledAt);
+  for (const file of files) formData.append("files", file, file.name);
+  return apiForm(`/api/users/${encodeURIComponent(chatId)}/reply/media`, formData);
+}
+
+function updatePendingOutgoing(localId, patch) {
+  pendingOutgoingMessages = pendingOutgoingMessages.map((message) => (message.localId === localId ? { ...message, ...patch } : message));
+}
+
+function pendingReplyKey(chatId, text, files, scheduledAt) {
+  const fileKey = files.map((file) => `${file.name}:${file.size}:${file.type}`).join("|");
+  return `${chatId}::${text}::${fileKey}::${scheduledAt || ""}`;
+}
+
+function fileToAttachment(file) {
+  return { name: file.name, filename: file.name, mimeType: file.type, size: file.size };
+}
+
+function attachmentSummary(attachments = []) {
+  if (!attachments.length) return "";
+  const names = attachments.map((item) => item.filename || item.name || "файл").join(", ");
+  return `Вложение: ${names}`;
+}
+
+function renderReplyAttachments() {
+  const files = [...(document.getElementById("replyFiles")?.files || [])];
+  document.getElementById("replyAttachmentList").innerHTML = files.length
+    ? files.map((file) => `<span class="attachment-chip">${escapeHtml(file.name)} · ${Math.ceil(file.size / 1024)} КБ</span>`).join("")
+    : "";
+}
+
+function scheduledInputToIso(value) {
+  if (!value) return "";
+  const normalized = value.length === 16 ? `${value}:00+03:00` : `${value}+03:00`;
+  const timestamp = Date.parse(normalized);
+  if (!Number.isFinite(timestamp) || timestamp <= Date.now() + 15_000) return "";
+  return new Date(timestamp).toISOString();
 }
 
 async function resumeBotForClient() {
@@ -930,8 +1107,16 @@ function clientPreviewText(user, text) {
   return isBotPaused(user) ? `Ручной режим · ${preview}` : preview;
 }
 
+function clientManualNoteHtml(user) {
+  const note = first(user.manualProfile?.psychologistNotes);
+  return note ? `<small>${escapeHtml(note)}</small>` : "";
+}
+
 function messageClass(message) {
-  return [message.role, message.source || ""].filter(Boolean).map((part) => String(part).replace(/[^a-z0-9_-]/gi, "")).join(" ");
+  return [message.role, message.source || "", message.status || "", message.localId ? "pending" : ""]
+    .filter(Boolean)
+    .map((part) => String(part).replace(/[^a-z0-9_-]/gi, ""))
+    .join(" ");
 }
 
 function messageSourceLabel(message) {

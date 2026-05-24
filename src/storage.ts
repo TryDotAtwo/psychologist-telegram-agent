@@ -243,10 +243,11 @@ export async function readTranscript(env: Env, chatId: string): Promise<Transcri
         assistant?: string;
         createdAt?: string;
         source?: "bot" | "admin" | "telegram";
+        attachments?: TranscriptMessage["attachments"];
       };
       const createdAt = record.createdAt ?? new Date(0).toISOString();
       if (record.role && record.text) {
-        messages.push({ role: record.role, text: record.text, createdAt, source: record.source });
+        messages.push({ role: record.role, text: record.text, createdAt, source: record.source, attachments: record.attachments });
         continue;
       }
       if (record.user) messages.push({ role: "user", text: record.user, createdAt, source: "telegram" });

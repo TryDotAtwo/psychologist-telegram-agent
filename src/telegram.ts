@@ -54,6 +54,38 @@ export async function sendTelegramChatAction(env: Env, chatId: string, action = 
   }
 }
 
+export async function sendTelegramMedia(
+  env: Env,
+  chatId: string,
+  media: { blob: Blob; filename: string; mimeType: string; caption?: string }
+): Promise<void> {
+  const isVideo = media.mimeType.startsWith("video/");
+  const method = isVideo ? "sendVideo" : "sendPhoto";
+  const field = isVideo ? "video" : "photo";
+  const formData = new FormData();
+  formData.append("chat_id", chatId);
+  formData.append(field, media.blob, media.filename);
+  if (media.caption?.trim()) {
+    formData.append("caption", escapeTelegramHtml(media.caption.trim()).slice(0, 1024));
+    formData.append("parse_mode", "HTML");
+  }
+  formData.append(
+    "reply_markup",
+    JSON.stringify({
+      keyboard: DEFAULT_KEYBOARD,
+      resize_keyboard: true
+    })
+  );
+  const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`, {
+    method: "POST",
+    body: formData
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`telegram_media_status=${response.status}; body=${body.slice(0, 300)}`);
+  }
+}
+
 export async function getTelegramWebhookInfo(env: Env): Promise<TelegramApiResponse<TelegramWebhookInfo>> {
   const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/getWebhookInfo`);
   const payload = (await response.json()) as TelegramApiResponse<TelegramWebhookInfo>;
