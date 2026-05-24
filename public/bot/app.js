@@ -1388,7 +1388,7 @@ function botModeLabel(user) {
 
 function clientPreviewText(user, text) {
   const preview = text || "Нет текста";
-  return isBotPaused(user) ? `Ручной режим · ${preview}` : preview;
+  return isBotPaused(user) ? `Психолог отвечает · ${preview}` : preview;
 }
 
 function clientManualNoteHtml(user) {
