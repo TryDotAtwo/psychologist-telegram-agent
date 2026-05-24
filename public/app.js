@@ -10,6 +10,7 @@ let selectedAvailabilityId = null;
 let refreshTimer = null;
 let messageRefreshTimer = null;
 let refreshInFlight = false;
+let replyInFlight = false;
 let lastRenderedChatId = null;
 let lastMessagesKey = "";
 let lastReminderComposerClientId = null;
@@ -477,7 +478,7 @@ function renderUsers() {
     ? visibleUsers.map((user) => `
       <button class="client-row ${user.chatId === selectedClientId ? "selected" : ""}" data-client-open="${escapeAttr(user.chatId)}">
         <span><b>${escapeHtml(displayClientName(user))}</b><small>${escapeHtml(clientPreviewText(user, user.lastUserText))}</small></span>
-        <span class="row-badges">${attentionPill(user)}<em class="risk ${user.riskLevel}">${riskLabel(user.riskLevel)}</em></span>
+        <span class="row-badges"><time class="row-time">${shortChatTime(user.lastMessageAt)}</time>${attentionPill(user)}<em class="risk ${user.riskLevel}">${riskLabel(user.riskLevel)}</em></span>
       </button>
     `).join("")
     : `<div class="empty-state">Клиенты появятся после первых сообщений в Telegram.</div>`;
@@ -491,7 +492,7 @@ function renderProfiles() {
     ? visibleUsers.map((user) => `
       <button class="client-row ${user.chatId === selectedClientId ? "selected" : ""}" data-client-open="${escapeAttr(user.chatId)}">
         <span><b>${escapeHtml(displayClientName(user))}</b><small>${escapeHtml(profileListHint(user))}</small></span>
-        <span class="row-badges">${attentionPill(user)}<em class="risk ${user.riskLevel}">${riskLabel(user.riskLevel)}</em></span>
+        <span class="row-badges"><time class="row-time">${shortChatTime(user.lastMessageAt)}</time>${attentionPill(user)}<em class="risk ${user.riskLevel}">${riskLabel(user.riskLevel)}</em></span>
       </button>
     `).join("")
     : `<div class="empty-state">Профили появятся после первых сообщений в Telegram.</div>`;
@@ -624,34 +625,57 @@ async function renderMessages(chatId, options = {}) {
     const messages = await api(`/api/users/${encodeURIComponent(chatId)}/messages`);
     if (chatId !== selectedClientId) return;
     const key = JSON.stringify(messages);
-    if (lastRenderedChatId === chatId && lastMessagesKey === key) return;
+    if (lastRenderedChatId === chatId && lastMessagesKey === key) {
+      if (options.forceScroll) scrollMessagesToBottom(false);
+      return;
+    }
     const node = document.getElementById("messageHistory");
     node.innerHTML = messages.length
       ? messages.map((message) => `
-        <article class="message ${message.role}">
+        <article class="message ${messageClass(message)}">
           <p>${escapeHtml(message.text)}</p>
-          <small>${humanDateTime(message.createdAt)} · ${message.source || message.role}</small>
+          <small>${humanDateTime(message.createdAt)} · ${messageSourceLabel(message)}</small>
         </article>
       `).join("")
       : `<div class="empty-state">История сообщений пока пустая.</div>`;
     lastRenderedChatId = chatId;
     lastMessagesKey = key;
-    node.scrollTop = node.scrollHeight;
+    scrollMessagesToBottom(lastRenderedChatId === chatId && !options.forceScroll);
   } catch (error) {
     if (!options.silent) document.getElementById("messageHistory").innerHTML = `<div class="empty-state">Не удалось загрузить сообщения.</div>`;
   }
 }
 
+function scrollMessagesToBottom(smooth = true) {
+  const node = document.getElementById("messageHistory");
+  if (!node) return;
+  const behavior = smooth ? "smooth" : "auto";
+  requestAnimationFrame(() => {
+    node.scrollTo({ top: node.scrollHeight, behavior });
+    setTimeout(() => node.scrollTo({ top: node.scrollHeight, behavior: "auto" }), 40);
+  });
+}
+
 async function sendReply(event) {
   event.preventDefault();
+  if (replyInFlight) return;
   const text = document.getElementById("replyText").value.trim();
   if (!selectedClientId || !text) return;
-  await api(`/api/users/${encodeURIComponent(selectedClientId)}/reply`, { method: "POST", body: JSON.stringify({ text }) });
-  document.getElementById("replyText").value = "";
-  lastMessagesKey = "";
-  await refreshDashboardData(true);
-  await renderMessages(selectedClientId, { forceScroll: true });
-  document.getElementById("saveStatus").textContent = "Ответ отправлен. Бот поставлен на паузу для этого клиента.";
+  const form = document.getElementById("replyForm");
+  const submit = form.querySelector("button[type='submit']");
+  replyInFlight = true;
+  submit.disabled = true;
+  try {
+    await api(`/api/users/${encodeURIComponent(selectedClientId)}/reply`, { method: "POST", body: JSON.stringify({ text }) });
+    document.getElementById("replyText").value = "";
+    lastMessagesKey = "";
+    await refreshDashboardData(true);
+    await renderMessages(selectedClientId, { forceScroll: true });
+    document.getElementById("saveStatus").textContent = "Ответ отправлен. Бот поставлен на паузу для этого клиента.";
+  } finally {
+    replyInFlight = false;
+    submit.disabled = false;
+  }
 }
 
 async function resumeBotForClient() {
@@ -906,6 +930,17 @@ function clientPreviewText(user, text) {
   return isBotPaused(user) ? `Ручной режим · ${preview}` : preview;
 }
 
+function messageClass(message) {
+  return [message.role, message.source || ""].filter(Boolean).map((part) => String(part).replace(/[^a-z0-9_-]/gi, "")).join(" ");
+}
+
+function messageSourceLabel(message) {
+  if (message.source === "admin") return "психолог";
+  if (message.source === "bot") return "бот";
+  if (message.source === "telegram") return "клиент";
+  return message.role;
+}
+
 function clearReminderComposer() {
   const text = document.getElementById("reminderText");
   const dueAt = document.getElementById("reminderDueAt");
@@ -1006,6 +1041,15 @@ function humanDate(value) {
 
 function humanDateTime(value) {
   return new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Moscow" }).format(new Date(value));
+}
+
+function shortChatTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const nowKey = dateKey(new Date().toISOString());
+  const valueKey = dateKey(value);
+  if (nowKey === valueKey) return new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Moscow" }).format(date);
+  return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit", timeZone: "Europe/Moscow" }).format(date);
 }
 
 function escapeHtml(value) {
