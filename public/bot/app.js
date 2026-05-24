@@ -12,14 +12,23 @@ let messageRefreshTimer = null;
 let refreshInFlight = false;
 let pendingOutgoingMessages = [];
 const pendingReplyKeys = new Set();
+const recentReplyKeys = new Map();
 let lastRenderedChatId = null;
 let lastMessagesKey = "";
+let lastClientListKey = "";
+let lastProfileListKey = "";
 const cachedMessagesByChat = new Map();
+const cachedStorageKeys = new Map();
 const messagePageState = new Map();
 const loadingOlderChats = new Set();
 const CHAT_CACHE_PREFIX = "dashboard-chat-cache-v1";
+const CHAT_SCROLL_PREFIX = "dashboard-chat-scroll-v1";
 const CHAT_CACHE_LIMIT = 1500;
 const MESSAGE_PAGE_SIZE = 100;
+const DASHBOARD_REFRESH_MS = 3000;
+const MESSAGE_REFRESH_MS = 1600;
+const REPLY_DUPLICATE_WINDOW_MS = 5000;
+let messageRefreshInFlight = false;
 let lastReminderComposerClientId = null;
 let attentionNotifyReady = false;
 
@@ -111,8 +120,8 @@ async function loadAvailability(duration = 30) {
 
 function startRealtimeRefresh() {
   stopRealtimeRefresh();
-  refreshTimer = setInterval(refreshDashboardData, 1500);
-  messageRefreshTimer = setInterval(refreshSelectedMessages, 500);
+  refreshTimer = setInterval(refreshDashboardData, DASHBOARD_REFRESH_MS);
+  messageRefreshTimer = setInterval(refreshSelectedMessages, MESSAGE_REFRESH_MS);
 }
 
 function stopRealtimeRefresh() {
@@ -140,15 +149,20 @@ async function refreshDashboardData(force = false) {
     renderOverview();
     renderUsers();
     renderProfiles();
-    await renderClient({ skipMessages: true });
+    if (isSectionVisible("clients")) await renderClient({ skipMessages: true });
   } finally {
     refreshInFlight = false;
   }
 }
 
 async function refreshSelectedMessages() {
-  if (app.classList.contains("hidden") || !selectedClientId) return;
-  await renderMessages(selectedClientId, { silent: true });
+  if (app.classList.contains("hidden") || !selectedClientId || messageRefreshInFlight || !isSectionVisible("clients")) return;
+  messageRefreshInFlight = true;
+  try {
+    await renderMessages(selectedClientId, { silent: true });
+  } finally {
+    messageRefreshInFlight = false;
+  }
 }
 
 function renderAll() {
@@ -229,11 +243,13 @@ function setupStaticHandlers() {
   document.getElementById("replyText").addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
+      if (event.repeat) return;
       document.getElementById("replyForm").requestSubmit();
     }
   });
   document.getElementById("replyFiles").addEventListener("change", renderReplyAttachments);
-  document.getElementById("messageHistory").addEventListener("scroll", loadOlderMessagesOnScroll);
+  document.getElementById("messageHistory").addEventListener("scroll", handleMessageHistoryScroll);
+  document.getElementById("jumpToBottom").addEventListener("click", () => scrollMessagesToBottom(false));
   document.getElementById("scheduleReplyButton").addEventListener("click", chooseScheduledReplyTime);
   document.getElementById("replyScheduleAt").addEventListener("change", syncScheduleButton);
   syncScheduleButton();
@@ -282,6 +298,11 @@ function toggleDrawer(event) {
 
 function closeMobileDrawer() {
   app.classList.remove("drawer-open");
+}
+
+function isSectionVisible(section) {
+  const panel = document.querySelector(`[data-section-panel="${section}"]`);
+  return Boolean(panel && !panel.classList.contains("hidden-panel"));
 }
 
 function openSection(section) {
@@ -505,25 +526,31 @@ function renderBookings() {
 
 function renderUsers() {
   const visibleUsers = sortedUsers();
+  if (!selectedClientId && visibleUsers[0]) selectedClientId = visibleUsers[0].chatId;
+  const key = visibleUsers.map((user) => [user.chatId, user.chatId === selectedClientId, displayClientName(user), first(user.manualProfile?.psychologistNotes), shortChatTime(user.lastMessageAt)].join("::")).join("\n");
+  if (lastClientListKey === key) return;
+  lastClientListKey = key;
   document.getElementById("clientList").innerHTML = visibleUsers.length
     ? visibleUsers.map((user) => `
       <button class="client-row ${user.chatId === selectedClientId ? "selected" : ""}" data-client-open="${escapeAttr(user.chatId)}">
         <span><b>${escapeHtml(displayClientName(user))}</b>${clientManualNoteHtml(user)}</span>
-        <span class="row-badges"><time class="row-time">${shortChatTime(user.lastMessageAt)}</time>${attentionPill(user)}<em class="risk ${user.riskLevel}">${riskLabel(user.riskLevel)}</em></span>
+        <span class="row-badges"><time class="row-time">${shortChatTime(user.lastMessageAt)}</time></span>
       </button>
     `).join("")
     : `<div class="empty-state">Клиенты появятся после первых сообщений в Telegram.</div>`;
   attachClientOpenHandlers(document.getElementById("clientList"), "clients");
-  if (!selectedClientId && visibleUsers[0]) selectedClientId = visibleUsers[0].chatId;
 }
 
 function renderProfiles() {
   const visibleUsers = sortedUsers();
+  const key = visibleUsers.map((user) => [user.chatId, user.chatId === selectedClientId, displayClientName(user), profileListHint(user), shortChatTime(user.lastMessageAt)].join("::")).join("\n");
+  if (lastProfileListKey === key) return;
+  lastProfileListKey = key;
   document.getElementById("profileList").innerHTML = visibleUsers.length
     ? visibleUsers.map((user) => `
       <button class="client-row ${user.chatId === selectedClientId ? "selected" : ""}" data-client-open="${escapeAttr(user.chatId)}">
         <span><b>${escapeHtml(displayClientName(user))}</b><small>${escapeHtml(profileListHint(user))}</small></span>
-        <span class="row-badges"><time class="row-time">${shortChatTime(user.lastMessageAt)}</time>${attentionPill(user)}<em class="risk ${user.riskLevel}">${riskLabel(user.riskLevel)}</em></span>
+        <span class="row-badges"><time class="row-time">${shortChatTime(user.lastMessageAt)}</time></span>
       </button>
     `).join("")
     : `<div class="empty-state">Профили появятся после первых сообщений в Telegram.</div>`;
@@ -539,7 +566,7 @@ function attachClientOpenHandlers(root, targetSection = "clients") {
       openSection(targetSection);
       renderUsers();
       renderProfiles();
-      renderClient({ forceScroll: true });
+      renderClient({ restoreScroll: true });
       renderDetailedProfile();
     });
   });
@@ -560,8 +587,8 @@ async function renderClient(options = {}) {
   resumeButton.classList.toggle("hidden", !isBotPaused(user));
   renderConsultBrief(user, profile);
   if (options.skipMessages) return;
-  renderCachedMessagesImmediately(user.chatId, { forceScroll: true });
-  renderMessages(user.chatId, { forceScroll: true, silent: Boolean(options.silent) }).catch(() => undefined);
+  renderCachedMessagesImmediately(user.chatId, { restoreScroll: options.restoreScroll ?? true, forceScroll: options.forceScroll });
+  renderMessages(user.chatId, { restoreScroll: options.restoreScroll ?? true, forceScroll: options.forceScroll, silent: Boolean(options.silent) }).catch(() => undefined);
 }
 
 function renderDetailedProfile() {
@@ -655,7 +682,7 @@ function renderCachedMessagesImmediately(chatId, options = {}) {
   node.innerHTML = `<div class="empty-state">Загружаю последние сообщения...</div>`;
   lastRenderedChatId = chatId;
   lastMessagesKey = "";
-  scrollMessagesToBottom(false);
+  hideJumpToBottom();
 }
 
 async function renderMessages(chatId, options = {}) {
@@ -702,9 +729,10 @@ function renderMessageList(chatId, serverMessages, options = {}) {
   if (chatId !== selectedClientId) return;
   cleanupConfirmedPending(chatId, serverMessages);
   const messages = mergePendingMessages(chatId, serverMessages);
-  const key = JSON.stringify(messages.map(messageKeyData));
+  const key = messageListRenderKey(messages);
   if (lastRenderedChatId === chatId && lastMessagesKey === key) {
     if (options.forceScroll) scrollMessagesToBottom(false);
+    else updateJumpToBottomState();
     return;
   }
   const node = document.getElementById("messageHistory");
@@ -717,12 +745,25 @@ function renderMessageList(chatId, serverMessages, options = {}) {
     : `<div class="empty-state">История сообщений пока пустая.</div>`;
   lastRenderedChatId = chatId;
   lastMessagesKey = key;
-  if (options.prepend) node.scrollTop = node.scrollHeight - previousScrollHeight + previousScrollTop;
-  else if (shouldFollowBottom) scrollMessagesToBottom(wasSameChat && !options.forceScroll && !options.forceScrollImmediate);
+  if (options.prepend) {
+    node.scrollTop = node.scrollHeight - previousScrollHeight + previousScrollTop;
+    saveChatScrollState(chatId);
+    updateJumpToBottomState();
+  } else if (options.restoreScroll && restoreChatScrollState(chatId)) {
+    saveChatScrollState(chatId);
+    updateJumpToBottomState();
+  } else if (shouldFollowBottom) scrollMessagesToBottom(wasSameChat && !options.forceScroll && !options.forceScrollImmediate);
+  else updateJumpToBottomState();
 }
 
 function renderMessagesFromCache(chatId, options = {}) {
   renderMessageList(chatId, cachedMessagesByChat.get(chatId) || readCachedMessages(chatId), options);
+}
+
+function handleMessageHistoryScroll(event) {
+  saveChatScrollState(selectedClientId);
+  updateJumpToBottomState(event.currentTarget);
+  loadOlderMessagesOnScroll(event).catch(() => undefined);
 }
 
 async function loadOlderMessagesOnScroll(event) {
@@ -739,10 +780,20 @@ async function loadOlderMessagesOnScroll(event) {
   }
 }
 
+function updateJumpToBottomState(node = document.getElementById("messageHistory")) {
+  const button = document.getElementById("jumpToBottom");
+  if (!button) return;
+  button.classList.toggle("hidden", isNearBottom(node));
+}
+
+function hideJumpToBottom() {
+  document.getElementById("jumpToBottom")?.classList.add("hidden");
+}
+
 function cacheMergedMessages(chatId, messages, options = {}) {
   const cached = cachedMessagesByChat.get(chatId) || readCachedMessages(chatId);
   const reusableCached = options.replaceScheduled ? cached.filter((message) => message.status !== "scheduled") : cached;
-  const merged = mergeStoredMessages(reusableCached, messages);
+  const merged = mergeStoredMessages(reusableCached, messages).slice(-CHAT_CACHE_LIMIT);
   cachedMessagesByChat.set(chatId, merged);
   writeCachedMessages(chatId, merged);
   return merged;
@@ -770,7 +821,9 @@ function readCachedMessages(chatId) {
   try {
     const raw = localStorage.getItem(chatCacheKey(chatId));
     const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed.sort(byCreatedAt).slice(-CHAT_CACHE_LIMIT) : [];
+    const messages = Array.isArray(parsed) ? parsed.sort(byCreatedAt).slice(-CHAT_CACHE_LIMIT) : [];
+    cachedStorageKeys.set(chatId, messageListStorageKey(messages));
+    return messages;
   } catch {
     return [];
   }
@@ -778,7 +831,11 @@ function readCachedMessages(chatId) {
 
 function writeCachedMessages(chatId, messages) {
   try {
-    localStorage.setItem(chatCacheKey(chatId), JSON.stringify(messages.slice(-CHAT_CACHE_LIMIT)));
+    const limited = messages.slice(-CHAT_CACHE_LIMIT);
+    const key = messageListStorageKey(limited);
+    if (cachedStorageKeys.get(chatId) === key) return;
+    localStorage.setItem(chatCacheKey(chatId), JSON.stringify(limited));
+    cachedStorageKeys.set(chatId, key);
   } catch {
     // Browser storage can be full or disabled; network polling remains the fallback.
   }
@@ -786,6 +843,18 @@ function writeCachedMessages(chatId, messages) {
 
 function chatCacheKey(chatId) {
   return `${CHAT_CACHE_PREFIX}:${chatId}`;
+}
+
+function chatScrollKey(chatId) {
+  return `${CHAT_SCROLL_PREFIX}:${chatId}`;
+}
+
+function messageListStorageKey(messages) {
+  return messages.map(storedMessageKey).join("\n");
+}
+
+function messageListRenderKey(messages) {
+  return messages.map((message) => messageKeyData(message).join("::")).join("\n");
 }
 
 function byCreatedAt(a, b) {
@@ -861,15 +930,60 @@ function isNearBottom(node) {
   return !node || node.scrollHeight - node.scrollTop - node.clientHeight < 96;
 }
 
+function readChatScrollState(chatId) {
+  if (!chatId) return null;
+  try {
+    const state = JSON.parse(localStorage.getItem(chatScrollKey(chatId)) || "null");
+    return state && typeof state === "object" ? state : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveChatScrollState(chatId) {
+  if (!chatId) return;
+  const node = document.getElementById("messageHistory");
+  if (!node) return;
+  try {
+    localStorage.setItem(chatScrollKey(chatId), JSON.stringify({
+      scrollTop: Math.max(0, Math.round(node.scrollTop)),
+      wasAtBottom: isNearBottom(node),
+      updatedAt: Date.now()
+    }));
+  } catch {
+    // Scroll memory is an optional browser-local convenience.
+  }
+}
+
+function restoreChatScrollState(chatId) {
+  const node = document.getElementById("messageHistory");
+  const state = readChatScrollState(chatId);
+  if (!node || !state || state.wasAtBottom || !Number.isFinite(state.scrollTop)) return false;
+  node.scrollTop = Math.min(state.scrollTop, Math.max(0, node.scrollHeight - node.clientHeight));
+  return true;
+}
+
 function scrollMessagesToBottom(smooth = true) {
   const node = document.getElementById("messageHistory");
   if (!node) return;
   const behavior = smooth ? "smooth" : "auto";
   node.scrollTop = node.scrollHeight;
+  saveChatScrollState(selectedClientId);
+  updateJumpToBottomState(node);
   requestAnimationFrame(() => {
     node.scrollTo({ top: node.scrollHeight, behavior });
-    setTimeout(() => node.scrollTo({ top: node.scrollHeight, behavior: "auto" }), 40);
-    setTimeout(() => node.scrollTo({ top: node.scrollHeight, behavior: "auto" }), 140);
+    saveChatScrollState(selectedClientId);
+    updateJumpToBottomState(node);
+    setTimeout(() => {
+      node.scrollTo({ top: node.scrollHeight, behavior: "auto" });
+      saveChatScrollState(selectedClientId);
+      updateJumpToBottomState(node);
+    }, 40);
+    setTimeout(() => {
+      node.scrollTo({ top: node.scrollHeight, behavior: "auto" });
+      saveChatScrollState(selectedClientId);
+      updateJumpToBottomState(node);
+    }, 140);
   });
 }
 
@@ -882,7 +996,7 @@ async function sendReply(event) {
   const chatId = selectedClientId;
   if (!chatId || (!text && !files.length)) return;
   const key = pendingReplyKey(chatId, text, files, scheduledAt);
-  if (pendingReplyKeys.has(key)) return;
+  if (isDuplicateReply(key)) return;
   pendingReplyKeys.add(key);
   const localId = `local_${Date.now()}_${Math.random().toString(36).slice(2)}`;
   const optimistic = {
@@ -922,6 +1036,7 @@ async function sendReply(event) {
     refreshSelectedMessages().catch(() => undefined);
     document.getElementById("saveStatus").textContent = result.scheduled ? "Сообщение запланировано." : "Ответ отправлен. Бот поставлен на паузу для этого клиента.";
   } catch (error) {
+    recentReplyKeys.delete(key);
     updatePendingOutgoing(localId, { status: "failed", error: error instanceof Error ? error.message : String(error) });
     lastMessagesKey = "";
     renderMessagesFromCache(chatId, { forceScroll: true });
@@ -929,6 +1044,17 @@ async function sendReply(event) {
   } finally {
     pendingReplyKeys.delete(key);
   }
+}
+
+function isDuplicateReply(key) {
+  const now = Date.now();
+  for (const [itemKey, expiresAt] of recentReplyKeys) {
+    if (expiresAt <= now) recentReplyKeys.delete(itemKey);
+  }
+  if (pendingReplyKeys.has(key)) return true;
+  if ((recentReplyKeys.get(key) || 0) > now) return true;
+  recentReplyKeys.set(key, now + REPLY_DUPLICATE_WINDOW_MS);
+  return false;
 }
 
 async function sendReplyMedia(chatId, text, files, scheduledAt) {
@@ -1219,7 +1345,7 @@ function attentionPill(user) {
 
 function attentionLabel(user) {
   if (user.attentionReason === "client_requested_psychologist") return "позвал";
-  return "ручной";
+  return "психолог";
 }
 
 function seedAttentionNotifications(list) {
@@ -1257,7 +1383,7 @@ function isBotPaused(user) {
 }
 
 function botModeLabel(user) {
-  return isBotPaused(user) ? `ручной режим до ${humanDateTime(user.botPausedUntil)}` : "бот отвечает";
+  return isBotPaused(user) ? `психолог отвечает до ${humanDateTime(user.botPausedUntil)}` : "бот отвечает";
 }
 
 function clientPreviewText(user, text) {
@@ -1351,7 +1477,7 @@ function first(values) {
 }
 
 function riskLabel(value) {
-  return value === "urgent" ? "срочно" : value === "watch" ? "наблюдать" : "нет риска";
+  return value === "urgent" ? "срочно" : value === "watch" ? "требует внимания" : "нет риска";
 }
 
 function displayClientName(user) {

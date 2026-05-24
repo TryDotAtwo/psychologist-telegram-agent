@@ -511,6 +511,7 @@ p { margin: 6px 0 0; color: var(--muted); line-height: 1.45; }
   align-items: start;
 }
 .chat-panel {
+  position: relative;
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
   min-height: 0;
@@ -610,6 +611,27 @@ p { margin: 6px 0 0; color: var(--muted); line-height: 1.45; }
   background: var(--chat-canvas);
   scroll-behavior: smooth;
   scrollbar-gutter: stable;
+}
+.jump-bottom {
+  position: absolute;
+  right: 34px;
+  bottom: 94px;
+  z-index: 2;
+  width: 34px;
+  height: 34px;
+  min-height: 34px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--teal-dark);
+  border-color: var(--line);
+  box-shadow: var(--shadow);
+}
+.jump-bottom:hover,
+.jump-bottom:focus-visible {
+  background: var(--surface-soft);
 }
 .message {
   width: fit-content;
