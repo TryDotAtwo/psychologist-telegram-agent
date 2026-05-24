@@ -205,8 +205,8 @@ button.brand-mark:hover, button.brand-mark:focus-visible {
   55% { transform: rotate(245deg) scale(1.12); }
   100% { transform: rotate(360deg) scale(1); }
 }
-.brand-copy, .status, .secondary, nav span { transition: opacity 0.12s ease; }
-.drawer-collapsed .brand-copy, .drawer-collapsed .status, .drawer-collapsed .secondary, .drawer-collapsed nav span {
+.brand-copy, .status, nav span { transition: opacity 0.12s ease; }
+.drawer-collapsed .brand-copy, .drawer-collapsed .status, .drawer-collapsed nav span {
   opacity: 0;
   pointer-events: none;
 }
@@ -266,6 +266,55 @@ nav button.active::before {
 .status b { color: var(--teal-dark); }
 .status small { color: var(--muted); line-height: 1.35; }
 .secondary { width: 100%; min-width: 190px; }
+.sidebar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sidebar-icon-button {
+  width: 42px;
+  min-width: 42px;
+  height: 42px;
+  min-height: 42px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  flex: 0 0 auto;
+}
+.logout-button {
+  min-width: 0;
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.logout-icon {
+  font-weight: 800;
+  line-height: 1;
+}
+.drawer-collapsed .status {
+  display: none;
+}
+.drawer-collapsed .sidebar-actions {
+  margin-top: auto;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.drawer-collapsed .sidebar-icon-button,
+.drawer-collapsed .logout-button {
+  width: 42px;
+  min-width: 42px;
+  height: 42px;
+  min-height: 42px;
+  padding: 0;
+  flex: 0 0 auto;
+}
+.drawer-collapsed .logout-label {
+  display: none;
+}
 .theme-menu-button {
   text-align: center;
   font-weight: 700;
@@ -644,7 +693,7 @@ p { margin: 6px 0 0; color: var(--muted); line-height: 1.45; }
 }
 .reply-input-shell {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) minmax(150px, 210px);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   min-width: 0;
@@ -707,18 +756,30 @@ p { margin: 6px 0 0; color: var(--muted); line-height: 1.45; }
   clip: rect(0, 0, 0, 0);
   border: 0;
 }
-.schedule-field {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  align-items: center;
-  gap: 7px;
+.schedule-button {
+  width: 38px;
+  height: 38px;
+  min-height: 38px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
   color: var(--muted);
-  font-size: 12px;
+  display: grid;
+  place-items: center;
 }
-.schedule-field input {
-  min-height: 34px;
-  padding: 6px 8px;
-  border-radius: 12px;
+.schedule-button:hover,
+.schedule-button:focus-visible,
+.schedule-button.active {
+  color: var(--teal-dark);
+  background: var(--surface-soft);
+}
+.schedule-picker-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
 }
 .attachment-list {
   display: flex;
@@ -955,10 +1016,20 @@ td input:focus { background: var(--surface); border-color: var(--teal); }
     transition: transform 0.18s ease;
   }
   .app.drawer-open .sidebar { transform: translateX(0); }
-  .drawer-collapsed .brand-copy, .drawer-collapsed .status, .drawer-collapsed .secondary, .drawer-collapsed nav span {
+  .drawer-collapsed .brand-copy, .drawer-collapsed .status, .drawer-collapsed nav span {
     opacity: 1;
     pointer-events: auto;
   }
+  .drawer-collapsed .status { display: grid; }
+  .drawer-collapsed .sidebar-actions {
+    flex-direction: row;
+    align-items: center;
+  }
+  .drawer-collapsed .logout-button {
+    flex: 1;
+    width: auto;
+  }
+  .drawer-collapsed .logout-label { display: inline; }
   .drawer-collapsed nav span { display: inline; }
   .drawer-backdrop {
     display: none;
@@ -1007,7 +1078,6 @@ td input:focus { background: var(--surface); border-color: var(--teal); }
     padding: 12px;
   }
   .reply-form { grid-template-columns: minmax(0, 1fr) auto; }
-  .reply-input-shell { grid-template-columns: auto minmax(0, 1fr); }
-  .schedule-field { grid-column: 1 / -1; }
+  .reply-input-shell { grid-template-columns: auto minmax(0, 1fr) auto; }
   .reply-form .send-button { width: 48px; }
 }

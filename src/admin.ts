@@ -24,7 +24,7 @@ import {
   writeSchedule
 } from "./storage";
 import { escapeTelegramHtml, getTelegramWebhookInfo, sendTelegramMedia, sendTelegramMessage, setTelegramWebhook } from "./telegram";
-import type { BotConfig, ClientSummary, Env, OutboundAttachment, ScheduledOutboundMessage, WorkSchedule } from "./types";
+import type { BotConfig, ClientSummary, Env, OutboundAttachment, ScheduledOutboundMessage, TranscriptMessage, WorkSchedule } from "./types";
 
 const SESSION_COOKIE = "admin_session";
 
@@ -56,7 +56,7 @@ export async function handleAdminApi(request: Request, env: Env): Promise<Respon
     })));
   }
   const userRoute = parseUserRoute(url.pathname);
-  if (userRoute && request.method === "GET" && userRoute.action === "messages") return Response.json(await readTranscript(env, userRoute.chatId));
+  if (userRoute && request.method === "GET" && userRoute.action === "messages") return Response.json(await transcriptPage(env, userRoute.chatId, url));
   if (userRoute && request.method === "PUT" && userRoute.action === "profile") return Response.json(await updateUserProfile(request, env, userRoute.chatId));
   if (userRoute && request.method === "POST" && userRoute.action === "reply") return sendAdminReply(request, env, userRoute.chatId);
   if (userRoute && request.method === "POST" && userRoute.action === "reply-media") return sendAdminMediaReply(request, env, userRoute.chatId);
@@ -329,6 +329,15 @@ function normalizeSchedule(schedule: WorkSchedule, env: Env): WorkSchedule {
     weeklyTemplate: schedule.weeklyTemplate,
     dateOverrides: schedule.dateOverrides ?? {}
   };
+}
+
+async function transcriptPage(env: Env, chatId: string, url: URL): Promise<{ messages: TranscriptMessage[]; hasMore: boolean; before?: string }> {
+  const limit = clampNumber(Number(url.searchParams.get("limit") ?? "100"), 1, 100, 100);
+  const before = url.searchParams.get("before");
+  const sorted = (await readTranscript(env, chatId)).sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+  const eligible = before ? sorted.filter((message) => Date.parse(message.createdAt) < Date.parse(before)) : sorted;
+  const messages = eligible.slice(-limit);
+  return { messages, hasMore: eligible.length > messages.length, before: messages[0]?.createdAt };
 }
 
 function clampNumber(value: number | undefined, min: number, max: number, fallback: number): number {

@@ -15,6 +15,11 @@ const pendingReplyKeys = new Set();
 let lastRenderedChatId = null;
 let lastMessagesKey = "";
 const cachedMessagesByChat = new Map();
+const messagePageState = new Map();
+const loadingOlderChats = new Set();
+const CHAT_CACHE_PREFIX = "dashboard-chat-cache-v1";
+const CHAT_CACHE_LIMIT = 1500;
+const MESSAGE_PAGE_SIZE = 100;
 let lastReminderComposerClientId = null;
 let attentionNotifyReady = false;
 
@@ -228,6 +233,10 @@ function setupStaticHandlers() {
     }
   });
   document.getElementById("replyFiles").addEventListener("change", renderReplyAttachments);
+  document.getElementById("messageHistory").addEventListener("scroll", loadOlderMessagesOnScroll);
+  document.getElementById("scheduleReplyButton").addEventListener("click", chooseScheduledReplyTime);
+  document.getElementById("replyScheduleAt").addEventListener("change", syncScheduleButton);
+  syncScheduleButton();
   document.getElementById("resumeBot").onclick = resumeBotForClient;
   document.getElementById("saveClientProfile").onclick = saveClientProfile;
   document.getElementById("refreshClientProfile").onclick = refreshClientProfile;
@@ -253,7 +262,11 @@ function toggleTheme() {
 function syncThemeToggle() {
   const button = document.getElementById("themeToggle");
   if (!button) return;
-  button.textContent = document.documentElement.dataset.theme === "dark" ? "☀ Светлая тема" : "◐ Темная тема";
+  const isDark = document.documentElement.dataset.theme === "dark";
+  button.textContent = isDark ? "☀" : "◐";
+  const label = isDark ? "Включить светлую тему" : "Включить темную тему";
+  button.title = label;
+  button.setAttribute("aria-label", label);
 }
 
 function toggleDrawer(event) {
@@ -547,7 +560,8 @@ async function renderClient(options = {}) {
   resumeButton.classList.toggle("hidden", !isBotPaused(user));
   renderConsultBrief(user, profile);
   if (options.skipMessages) return;
-  await renderMessages(user.chatId, { forceScroll: options.forceScroll });
+  renderCachedMessagesImmediately(user.chatId, { forceScroll: true });
+  renderMessages(user.chatId, { forceScroll: true, silent: Boolean(options.silent) }).catch(() => undefined);
 }
 
 function renderDetailedProfile() {
@@ -628,29 +642,60 @@ function summaryChips(profile, user) {
   return chips.map(([label, value]) => `<div class="summary-chip"><b>${label}</b><span>${escapeHtml(value || "нет")}</span></div>`).join("");
 }
 
+function renderCachedMessagesImmediately(chatId, options = {}) {
+  const cached = cachedMessagesByChat.get(chatId) || readCachedMessages(chatId);
+  cachedMessagesByChat.set(chatId, cached);
+  if (cached.length) {
+    const previousState = messagePageState.get(chatId);
+    messagePageState.set(chatId, { hasMore: previousState?.hasMore ?? true, before: cached[0]?.createdAt });
+    renderMessageList(chatId, cached, options);
+    return;
+  }
+  const node = document.getElementById("messageHistory");
+  node.innerHTML = `<div class="empty-state">Загружаю последние сообщения...</div>`;
+  lastRenderedChatId = chatId;
+  lastMessagesKey = "";
+  scrollMessagesToBottom(false);
+}
+
 async function renderMessages(chatId, options = {}) {
   try {
-    const [messages, scheduled] = await Promise.all([
-      api(`/api/users/${encodeURIComponent(chatId)}/messages`),
-      api(`/api/outbound-messages?chatId=${encodeURIComponent(chatId)}`).catch(() => [])
+    const params = new URLSearchParams({ limit: String(MESSAGE_PAGE_SIZE) });
+    if (options.before) params.set("before", options.before);
+    const [page, scheduled] = await Promise.all([
+      api(`/api/users/${encodeURIComponent(chatId)}/messages?${params.toString()}`),
+      options.before ? Promise.resolve([]) : api(`/api/outbound-messages?chatId=${encodeURIComponent(chatId)}`).catch(() => [])
     ]);
     if (chatId !== selectedClientId) return;
-    const scheduledMessages = scheduled.map((item) => ({
-      role: "assistant",
-      source: "admin",
-      text: item.text || attachmentSummary(item.attachments),
-      createdAt: item.createdAt,
-      scheduledAt: item.dueAt,
-      status: "scheduled",
-      scheduledId: item.id,
-      attachments: item.attachments || []
-    }));
-    const serverMessages = [...messages, ...scheduledMessages].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
-    cachedMessagesByChat.set(chatId, serverMessages);
-    renderMessageList(chatId, serverMessages, options);
+    const serverPage = Array.isArray(page) ? { messages: page, hasMore: page.length >= MESSAGE_PAGE_SIZE, before: page[0]?.createdAt } : page;
+    const scheduledMessages = scheduled.map(scheduledOutboundToMessage);
+    const serverMessages = [...(serverPage.messages || []), ...scheduledMessages].sort(byCreatedAt);
+    const mergedMessages = cacheMergedMessages(chatId, serverMessages, { replaceScheduled: !options.before });
+    const previousState = messagePageState.get(chatId);
+    const hasMore = options.before
+      ? Boolean(serverPage.hasMore)
+      : previousState?.hasMore === false ? false : Boolean(serverPage.hasMore);
+    messagePageState.set(chatId, {
+      hasMore,
+      before: mergedMessages[0]?.createdAt || serverPage.before
+    });
+    renderMessageList(chatId, mergedMessages, options);
   } catch (error) {
     if (!options.silent) document.getElementById("messageHistory").innerHTML = `<div class="empty-state">Не удалось загрузить сообщения.</div>`;
   }
+}
+
+function scheduledOutboundToMessage(item) {
+  return {
+    role: "assistant",
+    source: "admin",
+    text: item.text || attachmentSummary(item.attachments),
+    createdAt: item.createdAt,
+    scheduledAt: item.dueAt,
+    status: "scheduled",
+    scheduledId: item.id,
+    attachments: item.attachments || []
+  };
 }
 
 function renderMessageList(chatId, serverMessages, options = {}) {
@@ -663,6 +708,8 @@ function renderMessageList(chatId, serverMessages, options = {}) {
     return;
   }
   const node = document.getElementById("messageHistory");
+  const previousScrollHeight = node.scrollHeight;
+  const previousScrollTop = node.scrollTop;
   const wasSameChat = lastRenderedChatId === chatId;
   const shouldFollowBottom = options.forceScroll || !wasSameChat || isNearBottom(node);
   node.innerHTML = messages.length
@@ -670,11 +717,79 @@ function renderMessageList(chatId, serverMessages, options = {}) {
     : `<div class="empty-state">История сообщений пока пустая.</div>`;
   lastRenderedChatId = chatId;
   lastMessagesKey = key;
-  if (shouldFollowBottom) scrollMessagesToBottom(wasSameChat && !options.forceScroll);
+  if (options.prepend) node.scrollTop = node.scrollHeight - previousScrollHeight + previousScrollTop;
+  else if (shouldFollowBottom) scrollMessagesToBottom(wasSameChat && !options.forceScroll && !options.forceScrollImmediate);
 }
 
 function renderMessagesFromCache(chatId, options = {}) {
-  renderMessageList(chatId, cachedMessagesByChat.get(chatId) || [], options);
+  renderMessageList(chatId, cachedMessagesByChat.get(chatId) || readCachedMessages(chatId), options);
+}
+
+async function loadOlderMessagesOnScroll(event) {
+  const node = event.currentTarget;
+  const chatId = selectedClientId;
+  if (!chatId || node.scrollTop > 80 || loadingOlderChats.has(chatId)) return;
+  const state = messagePageState.get(chatId);
+  if (!state?.hasMore || !state.before) return;
+  loadingOlderChats.add(chatId);
+  try {
+    await renderMessages(chatId, { before: state.before, prepend: true, silent: true });
+  } finally {
+    loadingOlderChats.delete(chatId);
+  }
+}
+
+function cacheMergedMessages(chatId, messages, options = {}) {
+  const cached = cachedMessagesByChat.get(chatId) || readCachedMessages(chatId);
+  const reusableCached = options.replaceScheduled ? cached.filter((message) => message.status !== "scheduled") : cached;
+  const merged = mergeStoredMessages(reusableCached, messages);
+  cachedMessagesByChat.set(chatId, merged);
+  writeCachedMessages(chatId, merged);
+  return merged;
+}
+
+function mergeStoredMessages(existing, incoming) {
+  const byKey = new Map();
+  [...existing, ...incoming].forEach((message) => byKey.set(storedMessageKey(message), message));
+  return [...byKey.values()].sort(byCreatedAt);
+}
+
+function storedMessageKey(message) {
+  return [
+    message.localId || "",
+    message.scheduledId || "",
+    message.role || "",
+    message.source || "",
+    message.createdAt || "",
+    message.text || "",
+    attachmentSummary(message.attachments)
+  ].join("::");
+}
+
+function readCachedMessages(chatId) {
+  try {
+    const raw = localStorage.getItem(chatCacheKey(chatId));
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.sort(byCreatedAt).slice(-CHAT_CACHE_LIMIT) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeCachedMessages(chatId, messages) {
+  try {
+    localStorage.setItem(chatCacheKey(chatId), JSON.stringify(messages.slice(-CHAT_CACHE_LIMIT)));
+  } catch {
+    // Browser storage can be full or disabled; network polling remains the fallback.
+  }
+}
+
+function chatCacheKey(chatId) {
+  return `${CHAT_CACHE_PREFIX}:${chatId}`;
+}
+
+function byCreatedAt(a, b) {
+  return Date.parse(a.createdAt) - Date.parse(b.createdAt);
 }
 
 function mergePendingMessages(chatId, serverMessages) {
@@ -750,9 +865,11 @@ function scrollMessagesToBottom(smooth = true) {
   const node = document.getElementById("messageHistory");
   if (!node) return;
   const behavior = smooth ? "smooth" : "auto";
+  node.scrollTop = node.scrollHeight;
   requestAnimationFrame(() => {
     node.scrollTo({ top: node.scrollHeight, behavior });
     setTimeout(() => node.scrollTo({ top: node.scrollHeight, behavior: "auto" }), 40);
+    setTimeout(() => node.scrollTo({ top: node.scrollHeight, behavior: "auto" }), 140);
   });
 }
 
@@ -784,6 +901,7 @@ async function sendReply(event) {
   document.getElementById("replyScheduleAt").value = "";
   filesInput.value = "";
   renderReplyAttachments();
+  syncScheduleButton();
   lastMessagesKey = "";
   renderMessagesFromCache(chatId, { forceScroll: true });
   try {
@@ -845,6 +963,46 @@ function renderReplyAttachments() {
   document.getElementById("replyAttachmentList").innerHTML = files.length
     ? files.map((file) => `<span class="attachment-chip">${escapeHtml(file.name)} · ${Math.ceil(file.size / 1024)} КБ</span>`).join("")
     : "";
+}
+
+function chooseScheduledReplyTime() {
+  const input = document.getElementById("replyScheduleAt");
+  if (!input) return;
+  if (typeof input.showPicker === "function") {
+    try {
+      input.showPicker();
+      return;
+    } catch {
+      // Fall back to a text prompt when the browser refuses a hidden native picker.
+    }
+  }
+  const raw = prompt("Когда отправить? Формат: 24.05.2026 18:30");
+  const normalized = schedulePromptToInput(raw || "");
+  if (normalized) {
+    input.value = normalized;
+    syncScheduleButton();
+  }
+}
+
+function syncScheduleButton() {
+  const input = document.getElementById("replyScheduleAt");
+  const button = document.getElementById("scheduleReplyButton");
+  if (!input || !button) return;
+  const scheduledAt = scheduledInputToIso(input.value);
+  button.classList.toggle("active", Boolean(scheduledAt));
+  const label = scheduledAt ? `Отложено на ${humanDateTime(scheduledAt)}` : "Отложить сообщение";
+  button.title = label;
+  button.setAttribute("aria-label", label);
+}
+
+function schedulePromptToInput(value) {
+  const trimmed = value.trim();
+  const iso = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})$/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}T${iso[4]}:${iso[5]}`;
+  const ru = trimmed.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})\s+(\d{1,2}):(\d{2})$/);
+  if (!ru) return "";
+  const [, day, month, year, hour, minute] = ru;
+  return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}T${hour.padStart(2, "0")}:${minute}`;
 }
 
 function scheduledInputToIso(value) {
