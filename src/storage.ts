@@ -21,6 +21,7 @@ const BOOKINGS_KEY = "calendar/bookings.json";
 const GOOGLE_BUSY_KEY = "calendar/google_busy.json";
 const USERS_KEY = "users/index.json";
 const REMINDERS_KEY = "reminders/index.json";
+const TRANSCRIPT_RETENTION_MESSAGES = 500;
 
 export const EMPTY_PROFILE: ClientProfileData = {
   facts: [],
@@ -257,6 +258,14 @@ export async function readTranscript(env: Env, chatId: string): Promise<Transcri
     }
   }
   return messages;
+}
+
+export async function appendTranscriptMessage(env: Env, chatId: string, message: TranscriptMessage): Promise<void> {
+  const messages = [...(await readTranscript(env, chatId)), message]
+    .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
+    .slice(-TRANSCRIPT_RETENTION_MESSAGES);
+  const text = messages.map((item) => JSON.stringify(item)).join("\n");
+  await writeStoredText(env, `transcripts/${chatId}.jsonl`, text ? `${text}\n` : "", "application/x-ndjson; charset=utf-8");
 }
 
 export async function appendJsonl(bucket: R2Bucket, key: string, record: unknown): Promise<void> {

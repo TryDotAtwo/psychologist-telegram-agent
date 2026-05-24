@@ -1,6 +1,6 @@
 import { appendClientMemoryMarkdown } from "./client_memory";
 import { memoryStub } from "./memory";
-import { appendStoredJsonl, readStoredJson, upsertClient, writeStoredJson } from "./storage";
+import { appendStoredJsonl, appendTranscriptMessage, readStoredJson, upsertClient, writeStoredJson } from "./storage";
 import { escapeTelegramHtml, sendTelegramMedia, sendTelegramMessage } from "./telegram";
 import type { ClientSummary, Env, OutboundAttachment, ScheduledOutboundMessage } from "./types";
 
@@ -70,7 +70,7 @@ export async function recordAdminOutbound(
   attachments: OutboundAttachment[] = []
 ): Promise<ClientSummary> {
   const transcriptText = text || attachmentSummary(attachments);
-  await appendStoredJsonl(env, `transcripts/${chatId}.jsonl`, {
+  await appendTranscriptMessage(env, chatId, {
     role: "assistant",
     text: transcriptText,
     createdAt,

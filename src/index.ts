@@ -13,7 +13,7 @@ import { ChatMemory, memoryStub } from "./memory";
 import { answerWithOpenAI } from "./openai";
 import { processScheduledOutboundMessages } from "./outbound_messages";
 import { handleReminderFollowUpResponse, processDueReminders } from "./reminders";
-import { appendStoredJsonl, mergedProfile, readConfig, readUsers, upsertClient } from "./storage";
+import { appendStoredJsonl, appendTranscriptMessage, mergedProfile, readConfig, readUsers, upsertClient } from "./storage";
 import { escapeTelegramHtml, formatAvailability, sendTelegramChatAction, sendTelegramMessage } from "./telegram";
 import type { BotConfig, ClientSummary, Env, TelegramUpdate } from "./types";
 
@@ -92,7 +92,7 @@ async function recordIncomingText(update: TelegramUpdate, env: Env): Promise<Rec
     method: "POST",
     body: JSON.stringify({ role: "user", text, createdAt: receivedAt })
   });
-  await appendStoredJsonl(env, `transcripts/${chatId}.jsonl`, {
+  await appendTranscriptMessage(env, chatId, {
     role: "user",
     text,
     createdAt: receivedAt,
@@ -213,7 +213,7 @@ async function handleText(incoming: RecordedIncomingText, env: Env, ctx: Executi
     body: JSON.stringify({ role: "assistant", text: answer, createdAt: answeredAt })
   });
   await upsertClient(env, { chatId, lastMessageAt: answeredAt, lastAssistantText: answer });
-  await appendStoredJsonl(env, `transcripts/${chatId}.jsonl`, {
+  await appendTranscriptMessage(env, chatId, {
     role: "assistant",
     text: answer,
     createdAt: answeredAt,
