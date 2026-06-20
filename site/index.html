@@ -52,8 +52,17 @@
           <figure class="map-figure">
             <div class="map-art" aria-label="Карта маршрута от точки А к жизни по своим правилам">
               <img src="/site/assets/life-map-reference.png" alt="" />
-              <span class="map-water map-water-lake" aria-hidden="true"><img src="/site/assets/life-map-reference.png" alt="" /></span>
-              <span class="map-water map-water-river" aria-hidden="true"><img src="/site/assets/life-map-reference.png" alt="" /></span>
+              <svg class="map-water-animation" viewBox="0 0 1006 320" aria-hidden="true" focusable="false">
+                <g class="lake-ripples">
+                  <ellipse class="lake-ripple lake-ripple-a" cx="280" cy="205" rx="52" ry="18" />
+                  <ellipse class="lake-ripple lake-ripple-b" cx="280" cy="205" rx="52" ry="18" />
+                  <ellipse class="lake-ripple lake-ripple-c" cx="280" cy="205" rx="52" ry="18" />
+                </g>
+                <g class="river-current">
+                  <path class="river-thread river-thread-a" d="M414 38 C449 52 447 82 420 103 C398 121 404 146 436 162 C474 181 476 210 440 240" />
+                  <path class="river-thread river-thread-b" d="M435 36 C462 55 454 82 431 105 C415 122 424 145 452 160 C485 178 486 205 457 238" />
+                </g>
+              </svg>
             </div>
           </figure>
         </div>
