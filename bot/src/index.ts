@@ -13,7 +13,7 @@ import { ChatMemory, memoryStub } from "./memory";
 import { answerWithOpenAI } from "./openai";
 import { processScheduledOutboundMessages } from "./outbound_messages";
 import { handleReminderFollowUpResponse, processDueReminders } from "./reminders";
-import { consumeSiteTelegramStart, fetchSiteAsset, handleSiteApi } from "./site";
+import { consumeSiteTelegramStart, fetchSiteAsset, handleSiteApi, syncTelegramChannelArticles } from "./site";
 import { appendStoredJsonl, appendTranscriptMessage, mergedProfile, readConfig, readUsers, upsertClient } from "./storage";
 import { escapeTelegramHtml, formatAvailability, sendTelegramChatAction, sendTelegramMessage } from "./telegram";
 import type { BotConfig, ClientSummary, Env, TelegramUpdate } from "./types";
@@ -46,7 +46,7 @@ export default {
   },
 
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    ctx.waitUntil(Promise.all([processDueReminders(env), processScheduledOutboundMessages(env)]));
+    ctx.waitUntil(Promise.all([processDueReminders(env), processScheduledOutboundMessages(env), syncTelegramChannelArticles(env)]));
   }
 };
 

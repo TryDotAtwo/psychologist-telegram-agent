@@ -11,6 +11,7 @@ import {
   readSiteRateBucket,
   readSiteSession,
   readSiteTranscript,
+  readStoredJson,
   upsertClient,
   upsertSiteArticle,
   writeSiteAsset,
@@ -18,7 +19,8 @@ import {
   writeSiteConfig,
   writeSiteLinkToken,
   writeSiteRateBucket,
-  writeSiteSession
+  writeSiteSession,
+  writeStoredJson
 } from "./storage";
 import type {
   ConsentRecord,
@@ -37,10 +39,24 @@ const SITE_LINK_TOKEN_TTL_MS = 15 * 60 * 1000;
 const SITE_RATE_WINDOW_MS = 60 * 1000;
 const SITE_RATE_LIMIT = 12;
 const SITE_CLIENT_PREFIX = "site:";
+const TELEGRAM_CHANNEL_USERNAME = "ASD_there";
+const TELEGRAM_CHANNEL_PUBLIC_URL = `https://t.me/s/${TELEGRAM_CHANNEL_USERNAME}`;
+const TELEGRAM_CHANNEL_SYNC_KEY = `site/telegram/${TELEGRAM_CHANNEL_USERNAME}/sync.json`;
+const TELEGRAM_CHANNEL_SYNC_MIN_INTERVAL_MS = 15 * 60 * 1000;
+const TELEGRAM_ARTICLE_PREFIX = `telegram_${TELEGRAM_CHANNEL_USERNAME}_`;
 
 type JsonValue = Record<string, unknown> | unknown[];
 type PublicSiteConfig = Omit<SiteConfig, "articleAgentInstructions">;
 type PublicArticle = Omit<SiteArticle, "id" | "coverImageKey">;
+type TelegramChannelPost = { id: number; url: string; date?: string; text: string };
+type TelegramChannelSyncState = {
+  checkedAt?: string;
+  lastImportedAt?: string;
+  lastPostId?: number;
+  lastError?: string;
+  importedCount?: number;
+  updatedCount?: number;
+};
 
 export function buildSiteSessionCookie(sessionId: string, expiresAt: string): string {
   return `${SITE_SESSION_COOKIE}=${encodeURIComponent(sessionId)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${Math.floor(SITE_SESSION_TTL_MS / 1000)}; Expires=${new Date(expiresAt).toUTCString()}`;
@@ -225,15 +241,14 @@ export async function handleAdminSiteApi(request: Request, env: Env): Promise<Re
   if (request.method === "GET" && url.pathname === "/api/site/articles") {
     return Response.json(await readSiteArticles(env));
   }
+  if (request.method === "POST" && url.pathname === "/api/site/articles/sync-channel") {
+    return Response.json(await syncTelegramChannelArticles(env, { force: true }));
+  }
   if (request.method === "POST" && url.pathname === "/api/site/articles") {
-    const draft = normalizeSiteArticleDraft((await request.json().catch(() => ({}))) as Partial<SiteArticle>);
-    const article = await upsertSiteArticle(env, draft);
-    return Response.json(article);
+    return Response.json({ error: "telegram_channel_source_required" }, { status: 405 });
   }
   if (request.method === "POST" && url.pathname === "/api/site/articles/generate") {
-    const body = (await request.json().catch(() => ({}))) as { topic?: string; tone?: string };
-    const article = await generateArticleDraft(env, body.topic, body.tone);
-    return Response.json(article);
+    return Response.json({ error: "telegram_channel_source_required" }, { status: 405 });
   }
   const articleRoute = url.pathname.match(/^\/api\/site\/articles\/([^/]+)(?:\/(publish|unpublish|cover|generate-image))?$/);
   if (articleRoute) {
@@ -246,6 +261,60 @@ export async function handleAdminSiteApi(request: Request, env: Env): Promise<Re
     if (request.method === "POST" && action === "generate-image") return Response.json(await generateArticleImage(request, env, id));
   }
   return null;
+}
+
+export async function syncTelegramChannelArticles(env: Env, options: { force?: boolean } = {}): Promise<{
+  ok: boolean;
+  skipped: boolean;
+  imported: number;
+  updated: number;
+  posts: number;
+  articles: SiteArticle[];
+  state: TelegramChannelSyncState;
+}> {
+  const now = new Date();
+  const previous = await readStoredJson<TelegramChannelSyncState>(env, TELEGRAM_CHANNEL_SYNC_KEY, {});
+  if (!options.force && previous.checkedAt && now.getTime() - Date.parse(previous.checkedAt) < TELEGRAM_CHANNEL_SYNC_MIN_INTERVAL_MS) {
+    return { ok: true, skipped: true, imported: 0, updated: 0, posts: 0, articles: await readSiteArticles(env), state: previous };
+  }
+
+  try {
+    const posts = await fetchTelegramChannelPosts();
+    const groups = groupTelegramPosts(posts);
+    const existing = await readSiteArticles(env);
+    const byId = new Map(existing.map((article) => [article.id, article]));
+    let imported = 0;
+    let updated = 0;
+
+    for (const group of groups) {
+      const id = `${TELEGRAM_ARTICLE_PREFIX}${group[0].id}`;
+      const current = byId.get(id);
+      const article = telegramGroupToArticle(group, current);
+      if (current) updated += article.bodyMarkdown !== current.bodyMarkdown || article.title !== current.title || article.summary !== current.summary ? 1 : 0;
+      else imported += 1;
+      byId.set(id, article);
+    }
+
+    const next = [...byId.values()].sort((a, b) => Date.parse(b.publishedAt || b.createdAt) - Date.parse(a.publishedAt || a.createdAt));
+    await writeSiteArticles(env, next);
+    const state: TelegramChannelSyncState = {
+      checkedAt: now.toISOString(),
+      lastImportedAt: imported || updated ? now.toISOString() : previous.lastImportedAt,
+      lastPostId: posts.reduce((max, post) => Math.max(max, post.id), previous.lastPostId || 0),
+      importedCount: (previous.importedCount || 0) + imported,
+      updatedCount: (previous.updatedCount || 0) + updated
+    };
+    await writeStoredJson(env, TELEGRAM_CHANNEL_SYNC_KEY, state);
+    return { ok: true, skipped: false, imported, updated, posts: posts.length, articles: next, state };
+  } catch (error) {
+    const state: TelegramChannelSyncState = {
+      ...previous,
+      checkedAt: now.toISOString(),
+      lastError: error instanceof Error ? error.message : String(error)
+    };
+    await writeStoredJson(env, TELEGRAM_CHANNEL_SYNC_KEY, state);
+    return { ok: false, skipped: false, imported: 0, updated: 0, posts: 0, articles: await readSiteArticles(env), state };
+  }
 }
 
 export async function consumeSiteTelegramStart(env: Env, rawToken: string, telegramChatId: string, profile: { username?: string; firstName?: string; lastName?: string }): Promise<boolean> {
@@ -300,6 +369,172 @@ export async function recordSiteAdminReply(env: Env, chatId: string, text: strin
   await appendSiteTranscriptMessage(env, siteSessionId, { role: "assistant", text, createdAt, source: "admin" });
   await appendTranscriptMessage(env, chatId, { role: "assistant", text, createdAt, source: "admin" });
   await upsertClient(env, { chatId, lastMessageAt: createdAt, lastAssistantText: text, lastAdminReplyAt: createdAt });
+}
+
+async function fetchTelegramChannelPosts(): Promise<TelegramChannelPost[]> {
+  const response = await fetch(TELEGRAM_CHANNEL_PUBLIC_URL, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 compatible; site-article-sync/1.0",
+      Accept: "text/html"
+    }
+  });
+  if (!response.ok) throw new Error(`telegram_channel_fetch_${response.status}`);
+  const html = await response.text();
+  const posts: TelegramChannelPost[] = [];
+  const blockPattern = /<div class="tgme_widget_message[^"]*"[^>]*data-post="ASD_there\/(\d+)"[\s\S]*?(?=<div class="tgme_widget_message|\s*<\/section>)/g;
+  for (const match of html.matchAll(blockPattern)) {
+    const id = Number(match[1]);
+    const block = match[0];
+    const rawText = block.match(/<div class="tgme_widget_message_text[^"]*"[^>]*>([\s\S]*?)<\/div>/)?.[1] || "";
+    const text = htmlToPlainText(rawText);
+    if (!Number.isFinite(id) || text.length < 80) continue;
+    const date = block.match(/<time datetime="([^"]+)"/)?.[1];
+    posts.push({ id, url: `https://t.me/${TELEGRAM_CHANNEL_USERNAME}/${id}`, date, text });
+  }
+  return posts.sort((a, b) => a.id - b.id).slice(-80);
+}
+
+function groupTelegramPosts(posts: TelegramChannelPost[]): TelegramChannelPost[][] {
+  const groups: TelegramChannelPost[][] = [];
+  const byTopic = new Map<string, TelegramChannelPost[]>();
+  for (const post of posts) {
+    const key = telegramSeriesKey(post.text);
+    if (key && /(?:част[ьи]\s*[2-9]|[2-9]\s*част[ьи]|продолжение)/i.test(post.text.slice(0, 180))) {
+      const group = byTopic.get(key);
+      if (group) {
+        group.push(post);
+        continue;
+      }
+    }
+    const previous = groups.at(-1);
+    if (previous && shouldJoinTelegramPost(previous, post)) {
+      previous.push(post);
+      if (key) byTopic.set(key, previous);
+    } else {
+      const group = [post];
+      groups.push(group);
+      if (key) byTopic.set(key, group);
+    }
+  }
+  return groups.filter((group) => group.map((post) => post.text).join("\n").length >= 160);
+}
+
+function telegramSeriesKey(text: string): string | null {
+  const firstLine = text.split(/\n+/)[0]?.trim() || "";
+  const normalized = firstLine
+    .toLowerCase()
+    .replace(/["«»]/g, "")
+    .replace(/\b(?:пост\s*)?\d+[.)]\s*/i, "")
+    .replace(/\b(?:част[ьи]\s*\d+|\d+\s*част[ьи]|продолжение)\b/gi, "")
+    .replace(/[^\p{L}\p{N}\s]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (normalized.length < 12) return null;
+  return normalized.split(" ").slice(0, 7).join(" ");
+}
+
+function shouldJoinTelegramPost(group: TelegramChannelPost[], next: TelegramChannelPost): boolean {
+  if (group.length >= 3) return false;
+  const previous = group.at(-1);
+  if (!previous?.date || !next.date) return false;
+  const hours = Math.abs(Date.parse(next.date) - Date.parse(previous.date)) / (60 * 60 * 1000);
+  if (hours > 4) return false;
+  const text = next.text.trim();
+  const startsAsContinuation = /^[а-яёa-z0-9(—-]/i.test(text) || /^[•\-–]/.test(text);
+  const previousContinues = /[:,;—-]\s*$/.test(previous.text.trim());
+  return startsAsContinuation || previousContinues || group.map((post) => post.text).join("\n").length < 1200;
+}
+
+function telegramGroupToArticle(group: TelegramChannelPost[], current?: SiteArticle): SiteArticle {
+  const now = new Date().toISOString();
+  const first = group[0];
+  const combined = group.map((post) => post.text.trim()).join("\n\n---\n\n");
+  const title = extractTelegramArticleTitle(combined, first.id);
+  const tags = extractTelegramTags(combined);
+  const bodyMarkdown = [
+    `# ${title}`,
+    "",
+    `_Источник: [Telegram-канал ASD_there](${first.url})_`,
+    "",
+    combined
+  ].join("\n");
+  const createdAt = first.date || current?.createdAt || now;
+  const slugTail = uniqueSlugPart(slugifyRu(title) || `post-${first.id}`);
+  return {
+    id: `${TELEGRAM_ARTICLE_PREFIX}${first.id}`,
+    slug: current?.slug || `telegram-${first.id}-${slugTail}`,
+    title,
+    summary: firstSentence(combined).slice(0, 300) || "Материал из Telegram-канала психолога.",
+    bodyMarkdown,
+    status: current?.status || "published",
+    tags,
+    coverImageKey: current?.coverImageKey,
+    coverImageUrl: current?.coverImageUrl || coverForTags(tags),
+    seoTitle: current?.seoTitle || title,
+    seoDescription: current?.seoDescription || (firstSentence(combined).slice(0, 220) || title),
+    createdAt,
+    updatedAt: now,
+    publishedAt: current?.publishedAt || createdAt
+  };
+}
+
+function extractTelegramArticleTitle(text: string, postId: number): string {
+  const line = text
+    .split(/\n+/)
+    .map((item) => item.replace(/^#+\s*/, "").trim())
+    .find((item) => item.length >= 8);
+  if (!line) return `Материал из Telegram-канала #${postId}`;
+  const sentence = firstSentence(line) || line;
+  return sentence.replace(/[.!?]+$/, "").slice(0, 90);
+}
+
+function extractTelegramTags(text: string): string[] {
+  const lower = text.toLowerCase();
+  const tags: string[] = [];
+  const candidates: [string, string[]][] = [
+    ["РАС", ["рас", "аутизм", "аутич"]],
+    ["СДВГ", ["сдвг", "adhd"]],
+    ["сенсорика", ["сенсор"]],
+    ["маскинг", ["маск"]],
+    ["саморегуляция", ["регуляц", "саморегуляц"]],
+    ["выгорание", ["выгора", "устал"]],
+    ["отношения", ["отношен", "общени"]],
+    ["работа", ["работ", "карьер"]],
+    ["быт", ["быт", "рутин"]],
+    ["нейроотличность", ["нейроотлич", "нейроразно"]]
+  ];
+  for (const [tag, needles] of candidates) {
+    if (needles.some((needle) => lower.includes(needle))) tags.push(tag);
+  }
+  return tags.length ? tags.slice(0, 6) : ["психообразование"];
+}
+
+function coverForTags(tags: string[]): string {
+  if (tags.includes("маскинг")) return "/site/assets/mask-reference.png";
+  if (tags.includes("саморегуляция") || tags.includes("быт")) return "/site/assets/face-reference.png";
+  return "/site/assets/mask-map-reference.png";
+}
+
+function htmlToPlainText(html: string): string {
+  return decodeHtmlEntities(
+    html
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/p>/gi, "\n")
+      .replace(/<[^>]+>/g, "")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim()
+  );
+}
+
+function decodeHtmlEntities(value: string): string {
+  const named: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
+  return value.replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (_match, entity: string) => {
+    if (entity[0] === "#") {
+      const code = entity[1]?.toLowerCase() === "x" ? Number.parseInt(entity.slice(2), 16) : Number.parseInt(entity.slice(1), 10);
+      return Number.isFinite(code) ? String.fromCodePoint(code) : "";
+    }
+    return named[entity.toLowerCase()] || "";
+  });
 }
 
 async function getOrCreateSiteSession(request: Request, env: Env): Promise<{ session: SiteSession; cookie?: string }> {

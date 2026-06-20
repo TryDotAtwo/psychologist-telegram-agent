@@ -1210,3 +1210,9 @@ td input:focus { background: var(--surface); border-color: var(--teal); }
   .reply-input-shell { grid-template-columns: auto minmax(0, 1fr) auto; }
   .reply-form .send-button { width: 48px; }
 }
+
+#createArticleDraft,
+#generateArticleDraft,
+.article-ai-row {
+  display: none !important;
+}

@@ -272,8 +272,7 @@ function setupStaticHandlers() {
   document.getElementById("addService").onclick = addService;
   document.getElementById("addPrice").onclick = addPrice;
   document.getElementById("saveSiteConfig").onclick = saveSiteConfig;
-  document.getElementById("createArticleDraft").onclick = createArticleDraft;
-  document.getElementById("generateArticleDraft").onclick = generateArticleDraft;
+  ensureTelegramArticleSyncButton();
   document.getElementById("saveArticle").onclick = saveSelectedArticle;
   document.getElementById("publishArticle").onclick = publishSelectedArticle;
   document.getElementById("unpublishArticle").onclick = unpublishSelectedArticle;
@@ -555,6 +554,30 @@ function collectArticlePatch() {
     seoDescription: document.getElementById("articleSeoDescription").value.trim(),
     bodyMarkdown: document.getElementById("articleBody").value.trim()
   };
+}
+
+function ensureTelegramArticleSyncButton() {
+  const createButton = document.getElementById("createArticleDraft");
+  const generateButton = document.getElementById("generateArticleDraft");
+  const row = createButton?.parentElement || generateButton?.parentElement;
+  if (!row || document.getElementById("syncTelegramArticles")) return;
+  const button = document.createElement("button");
+  button.id = "syncTelegramArticles";
+  button.type = "button";
+  button.textContent = "Синхронизировать Telegram";
+  button.onclick = syncTelegramArticles;
+  row.prepend(button);
+}
+
+async function syncTelegramArticles() {
+  document.getElementById("articleEditorStatus").textContent = "Синхронизирую Telegram-канал ASD_there...";
+  const result = await api("/api/site/articles/sync-channel", { method: "POST", body: "{}" });
+  siteArticles = result.articles || siteArticles;
+  if (!selectedSiteArticleId && siteArticles[0]) selectedSiteArticleId = siteArticles[0].id;
+  renderSite();
+  document.getElementById("articleEditorStatus").textContent = result.ok
+    ? `Синхронизировано: новых ${result.imported || 0}, обновлено ${result.updated || 0}, постов прочитано ${result.posts || 0}.`
+    : `Синхронизация не удалась: ${result.state?.lastError || "канал временно недоступен"}.`;
 }
 
 async function createArticleDraft() {
