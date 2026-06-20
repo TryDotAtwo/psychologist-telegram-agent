@@ -392,6 +392,20 @@ label {
   border-right: 0;
 }
 
+.step-reference {
+  width: 100%;
+  aspect-ratio: 1.08;
+  object-fit: contain;
+  background: var(--paper);
+  border-bottom: 1px solid var(--line);
+  margin: calc(clamp(24px, 4vw, 46px) * -1) calc(clamp(24px, 4vw, 46px) * -1) 8px;
+  width: calc(100% + clamp(24px, 4vw, 46px) * 2);
+}
+
+.page[data-page="about"] .reference-strip {
+  display: none;
+}
+
 .room-section {
   display: grid;
   grid-template-columns: minmax(0, 0.58fr) minmax(300px, 0.42fr);
