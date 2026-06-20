@@ -7,7 +7,7 @@ Cloudflare Worker для Telegram-бота и админ-дашборда пси
 - Cloudflare Workers + Assets
 - Durable Object `ChatMemory`
 - R2 bucket binding `BOT_OBJECTS`
-- Public site `/`
+- Public site `/site`
 - Public site API `/site/api/*`
 - Telegram webhook `/telegram/webhook`
 - Admin dashboard `/bot/`
@@ -60,7 +60,7 @@ Workflow `.github/workflows/deploy.yml` деплоит Worker после push в
 
 Этот репозиторий является публичным источником для всего Cloudflare Worker:
 
-- `https://тупа.рф/` отдаёт публичный сайт.
+- `https://тупа.рф/site` отдаёт публичный сайт. Корень `/` не занимает этот Worker.
 - `https://тупа.рф/site/api/*` отдаёт public API сайта.
 - `https://тупа.рф/bot/` отдаёт admin dashboard.
 - `https://тупа.рф/bot/api/*` отдаёт admin API после Google OAuth.

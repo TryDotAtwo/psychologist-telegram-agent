@@ -19,7 +19,7 @@
   },
   "routes": [
     {
-      "pattern": "xn--80a3aie.xn--p1ai/*",
+      "pattern": "xn--80a3aie.xn--p1ai/site*",
       "zone_name": "xn--80a3aie.xn--p1ai"
     },
     {

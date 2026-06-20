@@ -41,7 +41,8 @@ export default {
     if (url.pathname === "/health") return Response.json({ ok: true, service: env.PUBLIC_BOT_NAME });
     if (url.pathname === "/telegram/webhook") return handleTelegramWebhook(request, env, ctx);
     if (url.pathname === "/bot" || url.pathname.startsWith("/bot/")) return fetchDashboardAsset(request, env);
-    return fetchSiteAsset(request, env);
+    if (url.pathname === "/site" || url.pathname.startsWith("/site/")) return fetchSiteAsset(request, env);
+    return new Response("not found", { status: 404 });
   },
 
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {

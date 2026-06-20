@@ -102,9 +102,8 @@ export async function hashSiteLinkToken(token: string): Promise<string> {
 
 export async function fetchSiteAsset(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
-  if (url.pathname === "/" || url.pathname === "") url.pathname = "/site/index.html";
-  else if (url.pathname === "/articles" || url.pathname.startsWith("/articles/")) url.pathname = "/site/index.html";
-  else if (!url.pathname.startsWith("/site/")) url.pathname = `/site${url.pathname}`;
+  if (url.pathname === "/site" || url.pathname === "/site/") url.pathname = "/site/index.html";
+  else if (url.pathname === "/site/articles" || url.pathname.startsWith("/site/articles/")) url.pathname = "/site/index.html";
   return env.ASSETS.fetch(new Request(url.toString(), request));
 }
 
