@@ -228,48 +228,40 @@ label {
 .map-art {
   position: relative;
   width: 100%;
+  overflow: hidden;
 }
 
-.map-art img,
+.map-art > img,
 .map-figure img {
   width: 100%;
   border: 0;
 }
 
-.water-animation {
+.map-water {
   position: absolute;
   inset: 0;
+  display: block;
   width: 100%;
   height: 100%;
   pointer-events: none;
-  overflow: visible;
+  overflow: hidden;
+  opacity: 0.5;
+  will-change: opacity;
 }
 
-.river-flow,
-.lake-wave {
-  fill: none;
-  stroke: var(--line);
-  stroke-linecap: round;
-  stroke-linejoin: round;
+.map-water img {
+  display: block;
+  width: 100%;
+  height: auto;
+  will-change: transform, filter;
 }
 
-.river-flow {
-  stroke-width: 1.15;
-  stroke-dasharray: 10 18;
-  opacity: 0.28;
+.map-water-lake {
+  clip-path: polygon(14% 47%, 26% 39%, 40% 43%, 45% 57%, 39% 71%, 22% 70%, 14% 61%);
 }
 
-.river-flow-b {
-  stroke-width: 0.85;
-  stroke-dasharray: 6 20;
-  opacity: 0.22;
-}
-
-.lake-wave {
-  stroke-width: 0.9;
-  opacity: 0.22;
-  transform-box: fill-box;
-  transform-origin: center;
+.map-water-river {
+  clip-path: polygon(33% 4%, 46% 5%, 47% 18%, 40% 28%, 43% 39%, 48% 48%, 46% 65%, 42% 75%, 38% 58%, 40% 47%, 36% 37%, 38% 24%);
 }
 
 .home-grid {
@@ -744,63 +736,44 @@ summary { cursor: pointer; }
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .map-art img,
+  .map-art > img,
   .wide-reference,
   .process-preview {
     transition: transform 450ms ease;
   }
 
-  .map-figure:hover .map-art img {
+  .map-figure:hover .map-art > img {
     transform: translateY(-2px);
   }
 
-  .river-flow {
-    animation: river-current 22s linear infinite;
+  .map-water-lake img {
+    animation: lake-image-drift 14s ease-in-out infinite;
   }
 
-  .river-flow-b {
-    animation-duration: 28s;
-    animation-direction: reverse;
-  }
-
-  .lake-wave-a {
-    animation: lake-breath 9s ease-in-out infinite;
-  }
-
-  .lake-wave-b {
-    animation: lake-breath 11s ease-in-out 1.5s infinite;
-  }
-
-  .lake-wave-c {
-    animation: lake-breath-soft 13s ease-in-out 0.8s infinite;
+  .map-water-river img {
+    animation: river-image-drift 18s ease-in-out infinite;
   }
 }
 
-@keyframes river-current {
-  to {
-    stroke-dashoffset: -180;
-  }
-}
-
-@keyframes lake-breath {
+@keyframes lake-image-drift {
   0%, 100% {
-    opacity: 0.16;
-    transform: scale(0.992);
+    transform: translate3d(0, 0, 0) scale(1.002);
+    filter: contrast(1);
   }
   50% {
-    opacity: 0.34;
-    transform: scale(1.018);
+    transform: translate3d(1.2px, -0.8px, 0) scale(1.006);
+    filter: contrast(0.96);
   }
 }
 
-@keyframes lake-breath-soft {
+@keyframes river-image-drift {
   0%, 100% {
-    opacity: 0.12;
-    transform: translateY(0) scaleX(0.995);
+    transform: translate3d(0, 0, 0) scale(1.002);
+    filter: contrast(1);
   }
   50% {
-    opacity: 0.28;
-    transform: translateY(2px) scaleX(1.012);
+    transform: translate3d(-0.9px, 1.4px, 0) scale(1.006);
+    filter: contrast(0.97);
   }
 }
 
