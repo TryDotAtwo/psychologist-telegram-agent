@@ -1,24 +1,92 @@
-let siteConfig = null;
-let services = [];
-let prices = [];
-let articles = [];
+const DEFAULT_CONFIG = {
+  enabled: true,
+  webBotEnabled: true,
+  brandName: "Карта жизни",
+  headline: "Психолог как карта, а не костыль",
+  subheadline: "Системно, научно, с нейронками",
+  bio: "Психологическая работа для взрослых с РАС/СДВГ: ясно, научно, без давления.",
+  telegramUrl: "https://t.me/practicing_autist_bot",
+  githubUrl: "https://github.com/TryDotAtwo/psychologist-telegram-agent",
+  consentVersion: "2026-06-20",
+  consentText:
+    "Я даю согласие на обработку данных, которые самостоятельно передаю через сайт: имя или псевдоним, контакт, сообщение в чате, запрос на запись и выбранное время. Данные нужны для ответа, записи и связи с психологом.",
+  privacyText:
+    "Сайт использует отдельную site-session cookie на 24 часа. Cookie содержит только случайный идентификатор. Читать сайт и блог можно без согласия. Чат, запись, Telegram-link и хранение профиля включаются только после явного согласия."
+};
+
+const DEFAULT_SERVICES = [
+  {
+    id: "consultation_60",
+    title: "Консультация 60 минут",
+    description: "Основная встреча: разбор запроса, карта ситуации, рабочие шаги.",
+    durationMinutes: 60
+  },
+  {
+    id: "extended_90",
+    title: "Расширенная встреча 90 минут",
+    description: "Когда нужно больше времени без спешки и обрыва на середине.",
+    durationMinutes: 90
+  },
+  {
+    id: "intro_30",
+    title: "Короткая первая связь 30 минут",
+    description: "Проверить формат, сформулировать запрос, понять следующий шаг.",
+    durationMinutes: 30
+  }
+];
+
+const DEFAULT_PRICES = [
+  { serviceId: "consultation_60", amount: 5000, currency: "₽", note: "Базовая цена за час." },
+  { serviceId: "extended_90", amount: 5500, currency: "₽", note: "Час + дополнительные 30 минут." },
+  { serviceId: "intro_30", amount: 2500, currency: "₽", note: "Если нужен короткий вход в формат." }
+];
+
+const FALLBACK_ARTICLES = [
+  {
+    slug: "self-instruction",
+    title: "Почему инструкция к себе работает лучше советов",
+    summary: "Как персональные правила и понятные алгоритмы уменьшают внутренний шум и помогают принимать решения без самонасилия.",
+    tags: ["самопонимание", "стратегии", "практика"],
+    coverImageUrl: "/site/assets/blog-thumb-map.png",
+    bodyMarkdown:
+      "## Смысл инструкции к себе\n\nСоветы часто звучат красиво, но плохо работают без контекста. Инструкция к себе фиксирует ваш реальный паттерн: что запускает перегрузку, что помогает восстановиться, какие правила снижают хаос.\n\n## Что мы собираем\n\n- триггеры и ранние сигналы;\n- опоры и ограничения;\n- маленькие действия вместо больших обещаний;\n- критерии, по которым понятно, что стратегия работает."
+  },
+  {
+    slug: "autism-adhd-chaos",
+    title: "РАС/СДВГ: как снижать хаос без самонасилия",
+    summary: "Практические подходы к регулированию, планированию и восстановлению энергии в условиях перегрузки и неопределенности.",
+    tags: ["регуляция", "сенсорика", "повседневность"],
+    coverImageUrl: "/site/assets/blog-thumb-mask.png",
+    bodyMarkdown:
+      "## Не усиливать давление\n\nЕсли внимание скачет, а сенсорная нагрузка высокая, жесткая дисциплина часто только увеличивает срыв. Рабочая система начинается с наблюдения и снижения лишней нагрузки.\n\n## Практический фокус\n\n- меньше решений в моменте;\n- понятные внешние подсказки;\n- восстановление как часть расписания;\n- правила, которые выдерживают плохой день."
+  },
+  {
+    slug: "masking-energy",
+    title: "Маски и энергия: где проходит граница",
+    summary: "Почему маски истощают и как распознавать свои настоящие потребности, не теряя контакт с собой.",
+    tags: ["маскинг", "границы", "идентичность"],
+    coverImageUrl: "/site/assets/blog-thumb-face.png",
+    bodyMarkdown:
+      "## Маска не всегда враг\n\nИногда маска защищает и помогает пройти ситуацию. Проблема начинается, когда она становится единственным способом быть с людьми.\n\n## Что важно заметить\n\n- сколько энергии стоит контакт;\n- где вы соглашаетесь автоматически;\n- какие условия позволяют говорить честнее;\n- что можно изменить маленьким шагом."
+  }
+];
+
+let siteConfig = { ...DEFAULT_CONFIG };
+let services = [...DEFAULT_SERVICES];
+let prices = [...DEFAULT_PRICES];
+let articles = [...FALLBACK_ARTICLES];
 let session = null;
+let activePage = "home";
 const turnstileTokens = {};
 const turnstileWidgetIds = {};
 
 const nodes = {
-  brandName: document.getElementById("brandName"),
-  footerBrand: document.getElementById("footerBrand"),
-  headline: document.getElementById("siteHeadline"),
-  subheadline: document.getElementById("siteSubheadline"),
-  bio: document.getElementById("siteBio"),
-  githubLink: document.getElementById("githubLink"),
-  footerGithub: document.getElementById("footerGithub"),
-  footerTelegram: document.getElementById("footerTelegram"),
+  pages: [...document.querySelectorAll("[data-page]")],
+  brandName: document.querySelector("[data-brand-name]"),
+  siteBio: document.querySelector("[data-site-bio]"),
   servicesList: document.getElementById("servicesList"),
-  consentForm: document.getElementById("consentForm"),
-  consentReady: document.getElementById("consentReady"),
-  consentText: document.getElementById("consentText"),
+  articlesList: document.getElementById("articlesList"),
+  articleReader: document.getElementById("articleReader"),
   privacyText: document.getElementById("privacyText"),
   chatLog: document.getElementById("chatLog"),
   chatForm: document.getElementById("chatForm"),
@@ -30,124 +98,315 @@ const nodes = {
   bookingStatus: document.getElementById("bookingStatus"),
   telegramButton: document.getElementById("createTelegramLink"),
   telegramStatus: document.getElementById("telegramStatus"),
-  articlesList: document.getElementById("articlesList"),
-  articleReader: document.getElementById("articleReader")
+  footerTelegram: document.getElementById("footerTelegram"),
+  footerGithub: document.getElementById("footerGithub"),
+  consentPanels: [...document.querySelectorAll("[data-consent-panel]")],
+  consentTemplate: document.getElementById("consentTemplate")
+};
+
+const TITLES = {
+  home: "Карта жизни",
+  approach: "Как проходит работа",
+  about: "О специалисте",
+  prices: "Услуги и цены",
+  blog: "Блог",
+  article: "Статья",
+  faq: "FAQ",
+  booking: "Запись",
+  chat: "Web-chat",
+  contacts: "Контакты",
+  privacy: "Данные и согласие"
 };
 
 init();
 
 async function init() {
-  bindHandlers();
-  await loadSite();
+  bindNavigation();
+  bindStaticForms();
+  await loadSiteConfig();
   await loadArticles();
-  if (session?.consentAccepted) await loadChat();
-  renderSelectedArticleFromPath();
+  renderAll();
+  routeToCurrentLocation(false);
   renderTurnstileWhenReady();
 }
 
-function bindHandlers() {
-  nodes.consentForm.addEventListener("submit", acceptConsent);
+function bindNavigation() {
+  document.addEventListener("click", (event) => {
+    const link = event.target.closest("a[data-link]");
+    if (!link) return;
+    const url = new URL(link.href, location.origin);
+    if (url.origin !== location.origin || !url.pathname.startsWith("/site")) return;
+    event.preventDefault();
+    history.pushState(null, "", url.pathname + url.search + url.hash);
+    routeToCurrentLocation(true);
+  });
+  window.addEventListener("popstate", () => routeToCurrentLocation(false));
+}
+
+function bindStaticForms() {
   nodes.chatForm.addEventListener("submit", sendChatMessage);
   nodes.bookingForm.addEventListener("submit", createBooking);
   nodes.bookingService.addEventListener("change", loadAvailability);
   nodes.telegramButton.addEventListener("click", createTelegramLink);
 }
 
-async function loadSite() {
-  const data = await api("/site/api/config");
-  siteConfig = data.config || {};
-  services = data.services || [];
-  prices = data.prices || [];
-  session = data.session || {};
-  document.title = siteConfig.brandName || "НейроПсихолог";
-  nodes.brandName.textContent = siteConfig.brandName || "НейроПсихолог";
-  nodes.footerBrand.textContent = siteConfig.brandName || "НейроПсихолог";
-  nodes.headline.textContent = siteConfig.headline || "Психологическая консультация";
-  nodes.subheadline.textContent = siteConfig.subheadline || "";
-  nodes.bio.textContent = siteConfig.bio || "";
-  setLink(nodes.githubLink, siteConfig.githubUrl, "GitHub проекта");
-  setLink(nodes.footerGithub, siteConfig.githubUrl, "GitHub");
-  setLink(nodes.footerTelegram, siteConfig.telegramUrl, "Telegram");
-  nodes.consentText.innerHTML = formatLegal(siteConfig.consentText, siteConfig.privacyText);
-  nodes.privacyText.innerHTML = formatLegal(siteConfig.privacyText, siteConfig.consentText);
-  renderServices();
-  renderConsentState();
-  await loadAvailability();
+async function loadSiteConfig() {
+  try {
+    const data = await api("/site/api/config");
+    siteConfig = sanitizeConfig(data.config || {});
+    services = Array.isArray(data.services) && data.services.length ? data.services : [...DEFAULT_SERVICES];
+    prices = Array.isArray(data.prices) && data.prices.length ? data.prices : [...DEFAULT_PRICES];
+    session = data.session || null;
+  } catch {
+    siteConfig = { ...DEFAULT_CONFIG };
+    services = [...DEFAULT_SERVICES];
+    prices = [...DEFAULT_PRICES];
+    session = null;
+  }
 }
 
 async function loadArticles() {
-  const data = await api("/site/api/articles");
-  articles = data.articles || [];
-  nodes.articlesList.innerHTML = articles.length
-    ? articles.map(articleCard).join("")
-    : `<div class="empty-state">Опубликованных статей пока нет.</div>`;
-  nodes.articlesList.querySelectorAll("[data-article-slug]").forEach((button) => {
-    button.addEventListener("click", () => openArticle(button.dataset.articleSlug));
+  try {
+    const data = await api("/site/api/articles");
+    const published = Array.isArray(data.articles) ? data.articles : [];
+    articles = published.length ? published.map(withArticleFallbacks) : [...FALLBACK_ARTICLES];
+  } catch {
+    articles = [...FALLBACK_ARTICLES];
+  }
+}
+
+function sanitizeConfig(raw) {
+  const next = { ...DEFAULT_CONFIG, ...raw };
+  for (const key of ["brandName", "headline", "subheadline", "bio", "consentText", "privacyText"]) {
+    next[key] = cleanText(next[key], DEFAULT_CONFIG[key]);
+  }
+  next.telegramUrl = raw.telegramUrl || DEFAULT_CONFIG.telegramUrl;
+  next.githubUrl = raw.githubUrl || DEFAULT_CONFIG.githubUrl;
+  next.webBotEnabled = raw.webBotEnabled !== false;
+  next.enabled = raw.enabled !== false;
+  return next;
+}
+
+function cleanText(value, fallback) {
+  const text = String(value || "").trim();
+  return !text || looksMojibake(text) ? fallback : text;
+}
+
+function looksMojibake(text) {
+  return /(Рќ|Рџ|РЎ|Рґ|Рё|СЃ|С‚|СЊ|СЏ|СЋ|С‡|С€|В·|В«|В»)/.test(text);
+}
+
+function renderAll() {
+  document.title = `${TITLES[activePage] || "Карта жизни"} · ${siteConfig.brandName}`;
+  nodes.brandName.textContent = siteConfig.brandName || DEFAULT_CONFIG.brandName;
+  nodes.siteBio.textContent = siteConfig.bio || DEFAULT_CONFIG.bio;
+  setExternalLink(nodes.footerTelegram, siteConfig.telegramUrl);
+  setExternalLink(nodes.footerGithub, siteConfig.githubUrl);
+  nodes.privacyText.innerHTML = formatLegal(siteConfig.privacyText, siteConfig.consentText);
+  renderServices();
+  renderArticlesList();
+  renderConsentPanels();
+  renderConsentState();
+}
+
+function routeToCurrentLocation(shouldScroll) {
+  const route = routeFromPath(location.pathname);
+  activePage = route.page;
+  nodes.pages.forEach((page) => page.classList.toggle("is-active", page.dataset.page === route.page));
+  document.querySelectorAll("[data-nav]").forEach((link) => {
+    const current = link.dataset.nav === (route.page === "article" ? "blog" : route.page);
+    link.toggleAttribute("aria-current", current);
   });
+  document.title = `${route.title || TITLES[route.page] || "Карта жизни"} · ${siteConfig.brandName}`;
+  if (route.page === "article") renderArticleBySlug(route.slug);
+  if (route.page === "chat" && session?.consentAccepted) loadChat();
+  if (route.page === "booking") loadAvailability();
+  renderConsentState();
+  renderTurnstileWhenReady();
+  if (shouldScroll) window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? "auto" : "smooth" });
+}
+
+function routeFromPath(pathname) {
+  const path = pathname.replace(/\/+$/, "") || "/site";
+  if (path === "/site") return { page: "home" };
+  if (path === "/site/articles") return { page: "blog" };
+  if (path.startsWith("/site/blog/")) {
+    const slug = decodeURIComponent(path.slice("/site/blog/".length));
+    return { page: "article", slug, title: articleTitle(slug) || "Статья" };
+  }
+  const page = path.slice("/site/".length);
+  if (["approach", "about", "prices", "blog", "faq", "booking", "chat", "contacts", "privacy"].includes(page)) return { page };
+  return { page: "home" };
 }
 
 function renderServices() {
-  nodes.bookingService.innerHTML = services.length
-    ? services.map((service) => `<option value="${escapeAttr(service.id)}">${escapeHtml(service.title)} · ${Number(service.durationMinutes || 30)} мин</option>`).join("")
-    : `<option value="consultation">Консультация · 30 мин</option>`;
-  nodes.servicesList.innerHTML = services.length
-    ? services.map((service) => {
-        const price = prices.find((item) => item.serviceId === service.id);
-        const priceText = price ? `${Number(price.amount || 0).toLocaleString("ru-RU")} ${escapeHtml(price.currency || "RUB")}` : "Цена уточняется";
-        return `
-          <article class="service-card">
-            <h3>${escapeHtml(service.title)}</h3>
-            <p>${escapeHtml(service.description || "")}</p>
-            <dl>
-              <div><dt>Длительность</dt><dd>${Number(service.durationMinutes || 30)} мин</dd></div>
-              <div><dt>Цена</dt><dd>${priceText}</dd></div>
-            </dl>
-            ${price?.note ? `<small>${escapeHtml(price.note)}</small>` : ""}
-          </article>
-        `;
-      }).join("")
-    : `<div class="empty-state">Услуги еще не опубликованы в dashboard.</div>`;
+  nodes.bookingService.innerHTML = services
+    .map((service) => `<option value="${escapeAttr(service.id)}">${escapeHtml(service.title)} · ${Number(service.durationMinutes || 60)} мин</option>`)
+    .join("");
+  nodes.servicesList.innerHTML = services
+    .map((service, index) => {
+      const price = priceForService(service, index);
+      return `
+        <article class="service-row">
+          <h2>${escapeHtml(service.title)}</h2>
+          <p>${escapeHtml(service.description || "Формат и длительность задаются в dashboard.")}</p>
+          <p><b>${Number(service.durationMinutes || 60)} минут</b></p>
+          <p>${escapeHtml(price)}</p>
+        </article>
+      `;
+    })
+    .join("");
+}
+
+function priceForService(service, index) {
+  const price = prices.find((item) => item.serviceId === service.id) || DEFAULT_PRICES[index] || DEFAULT_PRICES[0];
+  if (!price) return "Цена уточняется";
+  const currency = price.currency === "RUB" ? "₽" : price.currency || "₽";
+  const amount = Number(price.amount || 0);
+  const value = amount ? `${amount.toLocaleString("ru-RU")} ${currency}` : "Цена уточняется";
+  return price.note ? `${value}. ${price.note}` : value;
+}
+
+async function loadAvailability() {
+  const selected = selectedService();
+  const duration = Number(selected?.durationMinutes || 60);
+  nodes.bookingSlot.innerHTML = `<option value="">Загружаю свободные окна...</option>`;
+  try {
+    const from = new Date().toISOString();
+    const to = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
+    const data = await api(`/site/api/availability?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&durationMinutes=${duration}`);
+    const slots = data.availability || [];
+    nodes.bookingSlot.innerHTML = slots.length
+      ? slots.slice(0, 40).map((slot) => `<option value="${escapeAttr(slot.id)}">${escapeHtml(slotLabel(slot))}</option>`).join("")
+      : `<option value="">Свободных окон пока нет</option>`;
+  } catch {
+    nodes.bookingSlot.innerHTML = `<option value="">Не удалось загрузить окна</option>`;
+  }
+}
+
+function renderArticlesList() {
+  nodes.articlesList.innerHTML = articles.map(articleRow).join("");
+}
+
+function articleRow(article, index) {
+  const thumb = article.coverImageUrl || FALLBACK_ARTICLES[index % FALLBACK_ARTICLES.length].coverImageUrl;
+  return `
+    <a class="article-row" href="/site/blog/${encodeURIComponent(article.slug)}" data-link>
+      <img src="${escapeAttr(thumb)}" alt="" loading="lazy" />
+      <span>
+        <span class="article-meta">${escapeHtml((article.tags || []).slice(0, 3).join(" · ") || "практика")}</span>
+        <h2>${escapeHtml(article.title)}</h2>
+        <p>${escapeHtml(article.summary || "")}</p>
+        <span class="article-tags">${(article.tags || []).slice(0, 4).map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}</span>
+      </span>
+      <span class="article-arrow" aria-hidden="true">→</span>
+    </a>
+  `;
+}
+
+async function renderArticleBySlug(slug) {
+  let article = articles.find((item) => item.slug === slug);
+  if (!article || !article.bodyMarkdown) {
+    try {
+      const data = await api(`/site/api/articles/${encodeURIComponent(slug)}`);
+      article = data.article ? withArticleFallbacks(data.article) : article;
+    } catch {
+      article = article || null;
+    }
+  }
+  if (!article) {
+    nodes.articleReader.innerHTML = `
+      <p class="article-meta">/blog</p>
+      <h1 id="article-title">Статья не найдена</h1>
+      <div class="empty-state">Материал не опубликован или ссылка устарела.</div>
+    `;
+    return;
+  }
+  nodes.articleReader.innerHTML = `
+    <p class="article-meta">/blog · ${escapeHtml((article.tags || []).join(" · "))}</p>
+    <h1 id="article-title">${escapeHtml(article.title)}</h1>
+    <div class="markdown-body">${markdownToHtml(article.bodyMarkdown || article.summary || "")}</div>
+  `;
+}
+
+function articleTitle(slug) {
+  return articles.find((item) => item.slug === slug)?.title;
+}
+
+function withArticleFallbacks(article, index = 0) {
+  return {
+    ...article,
+    coverImageUrl: article.coverImageUrl || FALLBACK_ARTICLES[index % FALLBACK_ARTICLES.length].coverImageUrl,
+    tags: Array.isArray(article.tags) ? article.tags : []
+  };
+}
+
+function renderConsentPanels() {
+  nodes.consentPanels.forEach((panel) => {
+    if (session?.consentAccepted) {
+      panel.innerHTML = `
+        <div class="consent-ready">
+          <h2>Согласие принято</h2>
+          <p>Доступны web-chat, запись и Telegram-link. Cookie содержит только случайный site-session id.</p>
+          <a class="line-button" href="/site/privacy" data-link>Открыть политику</a>
+        </div>
+      `;
+      return;
+    }
+    const fragment = nodes.consentTemplate.content.cloneNode(true);
+    const form = fragment.querySelector("[data-consent-form]");
+    fragment.querySelector("[data-consent-text]").innerHTML = formatLegal(siteConfig.consentText, siteConfig.privacyText);
+    form.addEventListener("submit", acceptConsent);
+    panel.replaceChildren(fragment);
+  });
 }
 
 function renderConsentState() {
   const ready = Boolean(session?.consentAccepted);
-  nodes.consentForm.classList.toggle("hidden", ready);
-  nodes.consentReady.classList.toggle("hidden", !ready);
-  nodes.chatText.disabled = !ready || !siteConfig.webBotEnabled;
-  nodes.chatForm.querySelector("button").disabled = !ready || !siteConfig.webBotEnabled;
+  const chatEnabled = ready && siteConfig.webBotEnabled;
+  nodes.chatText.disabled = !chatEnabled;
+  nodes.chatForm.querySelector("button").disabled = !chatEnabled;
   nodes.bookingForm.querySelector("button").disabled = !ready;
   nodes.telegramButton.disabled = !ready;
   if (!ready) {
-    nodes.chatLog.innerHTML = `<div class="empty-state">Примите согласие, чтобы начать web-chat.</div>`;
+    nodes.chatLog.innerHTML = `<div class="empty-state">Примите согласие, чтобы начать web-chat. Чтение сайта и блога доступно без согласия.</div>`;
     nodes.chatStatus.textContent = "Чат заблокирован до согласия.";
     nodes.bookingStatus.textContent = "Запись заблокирована до согласия.";
     nodes.telegramStatus.textContent = "Связка Telegram заблокирована до согласия.";
   } else {
     nodes.chatStatus.textContent = siteConfig.webBotEnabled ? "" : "Web-chat временно отключен в dashboard.";
-    nodes.bookingStatus.textContent = "";
-    nodes.telegramStatus.textContent = "";
+    if (nodes.bookingStatus.textContent === "Запись заблокирована до согласия.") nodes.bookingStatus.textContent = "";
+    if (nodes.telegramStatus.textContent === "Связка Telegram заблокирована до согласия.") nodes.telegramStatus.textContent = "";
   }
 }
 
 async function acceptConsent(event) {
   event.preventDefault();
-  const accepted = document.getElementById("consentAccepted").checked;
+  const form = event.currentTarget;
+  const accepted = form.querySelector("[data-consent-accepted]").checked;
+  const status = form.querySelector("[data-consent-status]");
   if (!accepted) {
-    document.getElementById("consentStatus").textContent = "Нужно явно отметить согласие.";
+    status.textContent = "Нужно явно отметить согласие.";
     return;
   }
-  const data = await api("/site/api/consent", {
-    method: "POST",
-    body: JSON.stringify({
-      accepted: true,
-      name: document.getElementById("consentName").value.trim(),
-      contact: document.getElementById("consentContact").value.trim()
-    })
-  });
-  session = data.session;
-  document.getElementById("consentStatus").textContent = "Согласие сохранено.";
-  renderConsentState();
-  await loadChat();
+  status.textContent = "Сохраняю согласие...";
+  try {
+    const data = await api("/site/api/consent", {
+      method: "POST",
+      body: JSON.stringify({
+        accepted: true,
+        name: form.querySelector("[data-consent-name]").value.trim(),
+        contact: form.querySelector("[data-consent-contact]").value.trim()
+      })
+    });
+    session = data.session || session;
+    renderConsentPanels();
+    renderConsentState();
+    renderTurnstileWhenReady();
+    if (activePage === "chat") await loadChat();
+  } catch {
+    status.textContent = "Не удалось сохранить согласие. Попробуйте еще раз.";
+  }
 }
 
 async function loadChat() {
@@ -161,6 +420,10 @@ async function loadChat() {
 
 async function sendChatMessage(event) {
   event.preventDefault();
+  if (!session?.consentAccepted) {
+    nodes.chatStatus.textContent = "Сначала примите согласие.";
+    return;
+  }
   const text = nodes.chatText.value.trim();
   if (!text) return;
   nodes.chatText.value = "";
@@ -179,20 +442,12 @@ async function sendChatMessage(event) {
   }
 }
 
-async function loadAvailability() {
-  const selected = selectedService();
-  const duration = Number(selected?.durationMinutes || 30);
-  const from = new Date().toISOString();
-  const to = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
-  const data = await api(`/site/api/availability?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&durationMinutes=${duration}`);
-  const slots = data.availability || [];
-  nodes.bookingSlot.innerHTML = slots.length
-    ? slots.slice(0, 40).map((slot) => `<option value="${escapeAttr(slot.id)}">${escapeHtml(slotLabel(slot))}</option>`).join("")
-    : `<option value="">Свободных окон нет</option>`;
-}
-
 async function createBooking(event) {
   event.preventDefault();
+  if (!session?.consentAccepted) {
+    nodes.bookingStatus.textContent = "Сначала примите согласие.";
+    return;
+  }
   const selected = selectedService();
   const availabilityId = nodes.bookingSlot.value;
   if (!availabilityId) {
@@ -207,7 +462,7 @@ async function createBooking(event) {
       body: JSON.stringify({
         availabilityId,
         serviceId: selected?.id,
-        durationMinutes: Number(selected?.durationMinutes || 30),
+        durationMinutes: Number(selected?.durationMinutes || 60),
         name: document.getElementById("bookingName").value.trim(),
         contact: document.getElementById("bookingContact").value.trim(),
         request: [selected?.title ? `Услуга: ${selected.title}` : "", requestText].filter(Boolean).join("\n"),
@@ -217,13 +472,17 @@ async function createBooking(event) {
     nodes.bookingStatus.textContent = data.ok ? "Заявка создана. Психолог подтвердит время." : "Заявка не создана.";
     resetTurnstile("booking");
     await loadAvailability();
-    if (session?.consentAccepted) await loadChat();
+    if (activePage === "chat") await loadChat();
   } catch (error) {
     nodes.bookingStatus.textContent = errorMessage(error, "Не удалось создать заявку.");
   }
 }
 
 async function createTelegramLink() {
+  if (!session?.consentAccepted) {
+    nodes.telegramStatus.textContent = "Сначала примите согласие.";
+    return;
+  }
   nodes.telegramStatus.textContent = "Создаю одноразовую ссылку...";
   try {
     const data = await api("/site/api/telegram-link", {
@@ -237,19 +496,9 @@ async function createTelegramLink() {
   }
 }
 
-function selectedService() {
-  const serviceId = nodes.bookingService.value;
-  return services.find((service) => service.id === serviceId) || services[0] || { id: "consultation", title: "Консультация", durationMinutes: 30 };
-}
-
 function renderMessages(messages) {
   nodes.chatLog.innerHTML = messages.length
-    ? messages.map((message) => `
-      <div class="message ${escapeAttr(message.role)} ${escapeAttr(message.source || "")}">
-        <p>${escapeHtml(message.text)}</p>
-        <time>${escapeHtml(shortDateTime(message.createdAt))}</time>
-      </div>
-    `).join("")
+    ? messages.map(messageMarkup).join("")
     : `<div class="empty-state">Истории пока нет. Напишите первое сообщение.</div>`;
   nodes.chatLog.scrollTop = nodes.chatLog.scrollHeight;
 }
@@ -257,49 +506,26 @@ function renderMessages(messages) {
 function appendLocalMessage(message) {
   const empty = nodes.chatLog.querySelector(".empty-state");
   if (empty) nodes.chatLog.innerHTML = "";
-  nodes.chatLog.insertAdjacentHTML("beforeend", `
-    <div class="message ${escapeAttr(message.role)} local">
-      <p>${escapeHtml(message.text)}</p>
-      <time>${escapeHtml(shortDateTime(message.createdAt))}</time>
-    </div>
-  `);
+  nodes.chatLog.insertAdjacentHTML("beforeend", messageMarkup({ ...message, source: "local" }));
   nodes.chatLog.scrollTop = nodes.chatLog.scrollHeight;
 }
 
-function articleCard(article) {
+function messageMarkup(message) {
   return `
-    <article class="article-card">
-      ${article.coverImageUrl ? `<img src="${escapeAttr(article.coverImageUrl)}" alt="" loading="lazy" />` : ""}
-      <div>
-        <h3>${escapeHtml(article.title)}</h3>
-        <p>${escapeHtml(article.summary || "")}</p>
-        <button type="button" data-article-slug="${escapeAttr(article.slug)}">Читать</button>
-      </div>
-    </article>
+    <div class="message ${escapeAttr(message.role)} ${escapeAttr(message.source || "")}">
+      <p>${escapeHtml(message.text)}</p>
+      <time>${escapeHtml(shortDateTime(message.createdAt))}</time>
+    </div>
   `;
 }
 
-async function openArticle(slug) {
-  const data = await api(`/site/api/articles/${encodeURIComponent(slug)}`);
-  renderArticle(data.article);
-  history.pushState(null, "", `/articles/${encodeURIComponent(slug)}`);
+function selectedService() {
+  const serviceId = nodes.bookingService.value;
+  return services.find((service) => service.id === serviceId) || services[0] || DEFAULT_SERVICES[0];
 }
 
-function renderSelectedArticleFromPath() {
-  const match = location.pathname.match(/^\/articles\/([^/]+)$/);
-  if (match) openArticle(decodeURIComponent(match[1])).catch(() => {});
-}
-
-function renderArticle(article) {
-  if (!article) return;
-  nodes.articleReader.classList.remove("hidden");
-  nodes.articleReader.innerHTML = `
-    ${article.coverImageUrl ? `<img class="article-cover" src="${escapeAttr(article.coverImageUrl)}" alt="" />` : ""}
-    <p class="eyebrow">${escapeHtml((article.tags || []).join(" · "))}</p>
-    <h2>${escapeHtml(article.title)}</h2>
-    <div class="markdown-body">${markdownToHtml(article.bodyMarkdown || "")}</div>
-  `;
-  nodes.articleReader.scrollIntoView({ behavior: "smooth", block: "start" });
+function slotLabel(slot) {
+  return `${humanDateTime(slot.startsAt)} — ${shortTime(slot.endsAt)} · ${Number(slot.durationMinutes || 60)} мин`;
 }
 
 function renderTurnstileWhenReady(attempt = 0) {
@@ -349,18 +575,44 @@ async function api(path, options = {}) {
   return data;
 }
 
-function setLink(node, href, label) {
-  if (!href) {
-    node.classList.add("hidden");
-    return;
-  }
-  node.classList.remove("hidden");
-  node.href = href;
-  node.textContent = label;
+function errorMessage(error, fallback) {
+  if (error.status === 403 && error.payload?.error === "consent_required") return "Сначала примите согласие.";
+  if (error.status === 403 && String(error.payload?.error || "").startsWith("turnstile")) return "Подтвердите защиту Turnstile и повторите действие.";
+  if (error.status === 429) return "Слишком много запросов. Подождите минуту.";
+  if (error.status === 409) return "Это окно уже занято или недоступно.";
+  return fallback;
 }
 
-function slotLabel(slot) {
-  return `${humanDateTime(slot.startsAt)} · ${shortTime(slot.endsAt)} · ${Number(slot.durationMinutes || 30)} мин`;
+function setExternalLink(node, href) {
+  if (!node) return;
+  if (!href) {
+    node.hidden = true;
+    return;
+  }
+  node.hidden = false;
+  node.href = href;
+}
+
+function formatLegal(primary = "", secondary = "") {
+  return [primary, secondary]
+    .filter(Boolean)
+    .map((text) => `<p>${escapeHtml(text).replace(/\n+/g, "</p><p>")}</p>`)
+    .join("");
+}
+
+function markdownToHtml(markdown) {
+  const blocks = String(markdown || "").split(/\n{2,}/).map((block) => block.trim()).filter(Boolean);
+  return blocks
+    .map((block) => {
+      if (block.startsWith("### ")) return `<h4>${escapeHtml(block.slice(4))}</h4>`;
+      if (block.startsWith("## ")) return `<h3>${escapeHtml(block.slice(3))}</h3>`;
+      if (block.startsWith("# ")) return `<h2>${escapeHtml(block.slice(2))}</h2>`;
+      if (block.split("\n").every((line) => line.startsWith("- "))) {
+        return `<ul>${block.split("\n").map((line) => `<li>${escapeHtml(line.slice(2))}</li>`).join("")}</ul>`;
+      }
+      return `<p>${escapeHtml(block).replace(/\n/g, "<br />")}</p>`;
+    })
+    .join("");
 }
 
 function humanDateTime(value) {
@@ -376,28 +628,8 @@ function shortDateTime(value) {
   return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Moscow" }).format(new Date(value));
 }
 
-function formatLegal(primary = "", secondary = "") {
-  return [primary, secondary].filter(Boolean).map((text) => `<p>${escapeHtml(text).replace(/\n+/g, "</p><p>")}</p>`).join("");
-}
-
-function markdownToHtml(markdown) {
-  const blocks = String(markdown || "").split(/\n{2,}/).map((block) => block.trim()).filter(Boolean);
-  return blocks.map((block) => {
-    if (block.startsWith("### ")) return `<h4>${escapeHtml(block.slice(4))}</h4>`;
-    if (block.startsWith("## ")) return `<h3>${escapeHtml(block.slice(3))}</h3>`;
-    if (block.startsWith("# ")) return `<h2>${escapeHtml(block.slice(2))}</h2>`;
-    if (block.split("\n").every((line) => line.startsWith("- "))) {
-      return `<ul>${block.split("\n").map((line) => `<li>${escapeHtml(line.slice(2))}</li>`).join("")}</ul>`;
-    }
-    return `<p>${escapeHtml(block).replace(/\n/g, "<br />")}</p>`;
-  }).join("");
-}
-
-function errorMessage(error, fallback) {
-  if (error.status === 403 && error.payload?.error === "consent_required") return "Сначала примите согласие.";
-  if (error.status === 403 && error.payload?.error?.startsWith("turnstile")) return "Подтвердите защиту Turnstile и повторите действие.";
-  if (error.status === 429) return "Слишком много запросов. Подождите минуту.";
-  return fallback;
+function prefersReducedMotion() {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
 function escapeHtml(value) {

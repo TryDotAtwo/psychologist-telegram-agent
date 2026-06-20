@@ -3,151 +3,312 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>НейроПсихолог</title>
-    <meta name="description" content="Публичный сайт, web-chat, запись и Telegram-бот психолога." />
-    <link rel="stylesheet" href="/site/site.css?v=20260620-1" />
+    <title>Карта жизни</title>
+    <meta
+      name="description"
+      content="Многостраничный сайт психологической работы для взрослых с РАС/СДВГ: подход, цены, блог, запись и web-chat."
+    />
+    <link rel="preload" as="image" href="/site/assets/life-map-reference.png" />
+    <link rel="stylesheet" href="/site/site.css?v=20260620-2" />
     <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
   </head>
   <body>
-    <header class="site-header">
-      <a class="brand" href="/" aria-label="На главную">
-        <span class="brand-mark">Ψ</span>
-        <span id="brandName">НейроПсихолог</span>
+    <header class="site-shell" data-header>
+      <a class="brand" href="/site/" data-link aria-label="На главную">
+        <span class="brand-compass" aria-hidden="true">КЖ</span>
+        <span>
+          <b data-brand-name>Карта жизни</b>
+          <small>психологическая навигация</small>
+        </span>
       </a>
-      <nav aria-label="Разделы сайта">
-        <a href="#services">Услуги</a>
-        <a href="#chat">Чат</a>
-        <a href="#booking">Запись</a>
-        <a href="#articles">Статьи</a>
-        <a href="#privacy">Данные</a>
+      <nav class="primary-nav" aria-label="Разделы сайта">
+        <a href="/site/approach" data-link data-nav="approach">Подход</a>
+        <a href="/site/about" data-link data-nav="about">Обо мне</a>
+        <a href="/site/prices" data-link data-nav="prices">Услуги и цены</a>
+        <a href="/site/blog" data-link data-nav="blog">Блог</a>
+        <a href="/site/faq" data-link data-nav="faq">FAQ</a>
+        <a href="/site/contacts" data-link data-nav="contacts">Контакты</a>
       </nav>
+      <div class="header-actions">
+        <a class="line-button" href="/site/booking" data-link>Записаться</a>
+        <a class="line-button" href="/site/chat" data-link>Написать в чат</a>
+      </div>
     </header>
 
-    <main>
-      <section class="hero">
-        <div class="hero-copy">
-          <p class="eyebrow">web-chat · Telegram · запись</p>
-          <h1 id="siteHeadline">Психологическая консультация с бережным входом через бота</h1>
-          <p id="siteSubheadline" class="lead">Можно сначала задать вопрос, посмотреть услуги и выбрать свободное время.</p>
-          <div class="hero-actions">
-            <a class="primary" href="#chat">Открыть чат</a>
-            <a class="secondary" href="#booking">Выбрать время</a>
+    <main id="app" class="site-main">
+      <section class="page page-home" data-page="home" aria-labelledby="home-title">
+        <div class="home-hero">
+          <div class="home-copy">
+            <h1 id="home-title">Психолог как карта, а не костыль</h1>
+            <ul class="hero-facts" aria-label="Ключевые принципы">
+              <li>Системно, научно, с нейронками</li>
+              <li>Цель — чтобы вы постепенно справлялись без психолога</li>
+            </ul>
+            <div class="hero-actions">
+              <a class="dark-button" href="/site/booking" data-link>Записаться на сессию</a>
+              <a class="line-button" href="/site/chat" data-link>Написать в чат</a>
+            </div>
           </div>
+          <figure class="map-figure">
+            <img src="/site/assets/life-map-reference.png" alt="Карта маршрута от точки А к жизни по своим правилам" />
+          </figure>
         </div>
-        <aside class="hero-panel" aria-label="Краткий статус сервиса">
-          <div class="status-dot"></div>
-          <h2>Публичный контур</h2>
-          <p>Сайт использует отдельные public API, отдельную site-session cookie и явное согласие перед чатом, записью и связкой Telegram.</p>
-          <a id="githubLink" href="#" rel="noopener noreferrer" target="_blank">GitHub проекта</a>
-        </aside>
+
+        <div class="home-grid">
+          <article class="home-panel">
+            <h2>Как я работаю</h2>
+            <p>Методология — как система навигации: понять паттерн, собрать карту, закрепить самостоятельность.</p>
+            <img class="process-preview" src="/site/assets/work-process-reference.png" alt="Три этапа работы: понять паттерн, собрать карту, тренировать самостоятельность" />
+            <a href="/site/approach" data-link>Подробнее о подходе →</a>
+          </article>
+          <article class="home-panel pricing-panel">
+            <h2>Услуги и цены</h2>
+            <p class="price-large">5000 ₽ <span>/ час</span></p>
+            <ul class="plain-list">
+              <li>+500 ₽ за дополнительные 30 минут</li>
+              <li>мелкие вопросы в сопровождении — бесплатно</li>
+              <li>цена корректируется под доход</li>
+            </ul>
+            <a href="/site/prices" data-link>Посмотреть условия →</a>
+          </article>
+          <article class="home-panel">
+            <h2>Блог — карта статей</h2>
+            <div class="topic-map" aria-label="Темы блога">
+              <span>РАС/СДВГ</span><span>саморегуляция</span><span>работа</span>
+              <span>отношения</span><span>сенсорика</span><span>быт</span>
+              <span>маскинг</span><span>фокус</span><span>выгорание</span>
+            </div>
+            <a href="/site/blog" data-link>Смотреть все статьи →</a>
+          </article>
+          <article class="home-panel contact-panel">
+            <h2>Запись и связь</h2>
+            <a class="line-button" href="/site/booking" data-link>Выбрать время в календаре</a>
+            <a class="line-button" href="/site/chat" data-link>Написать в чат</a>
+            <ul class="check-list">
+              <li>Конфиденциально</li>
+              <li>Научный подход и уважение к нейроразнообразию</li>
+              <li>Четкие рамки и предсказуемый процесс</li>
+              <li>Поддержка между сессиями</li>
+            </ul>
+          </article>
+        </div>
       </section>
 
-      <section id="about" class="band">
-        <div class="section-head">
-          <h2>О формате</h2>
-          <p id="siteBio">Короткое описание специалиста и формата консультаций загружается из dashboard.</p>
+      <section class="page" data-page="approach" aria-labelledby="approach-title">
+        <div class="page-heading">
+          <p>/approach</p>
+          <h1 id="approach-title">Как проходит работа</h1>
+          <span>Референсный блок перенесен 1:1 по композиции: понять паттерн, собрать карту, тренировать самостоятельность.</span>
+        </div>
+        <img class="wide-reference" src="/site/assets/work-process-reference.png" alt="Как проходит работа" />
+        <div class="three-columns">
+          <article>
+            <h2>1. Понять паттерн</h2>
+            <p>Разбираем, как устроены трудности: что помогает, что истощает, где система ломается.</p>
+          </article>
+          <article>
+            <h2>2. Собрать карту</h2>
+            <p>Строим индивидуальную систему: триггеры, ресурсы, правила, опоры и рабочие алгоритмы.</p>
+          </article>
+          <article>
+            <h2>3. Тренировать самостоятельность</h2>
+            <p>Закрепляем навыки на реальной жизни, а не на идеальных условиях.</p>
+          </article>
+        </div>
+        <section class="room-section">
+          <img src="/site/assets/session-room-reference.png" alt="Сессия с маской и картой" />
+          <div>
+            <h2>Снять маску. Собрать систему.</h2>
+            <p>
+              Работа не про то, чтобы стать удобнее для других. Она про ясность: где маска экономит силы, где забирает
+              энергию, и какие правила помогают жить устойчивее.
+            </p>
+          </div>
+        </section>
+      </section>
+
+      <section class="page" data-page="about" aria-labelledby="about-title">
+        <div class="page-heading">
+          <p>/about</p>
+          <h1 id="about-title">О специалисте и формате</h1>
+          <span data-site-bio>Психологическая работа для взрослых с РАС/СДВГ: ясно, научно, без давления.</span>
+        </div>
+        <div class="text-grid">
+          <article>
+            <h2>Подход</h2>
+            <p>
+              Системная работа: меньше абстрактных советов, больше наблюдений, гипотез, проверок и понятных правил,
+              которые можно применять без постоянной опоры на психолога.
+            </p>
+          </article>
+          <article>
+            <h2>Нейросети</h2>
+            <p>
+              Нейросети используются как вспомогательный инструмент для структуры, заметок и навигации. Они не заменяют
+              клиническое решение и не получают приватные клиентские данные из публичного блога.
+            </p>
+          </article>
+          <article>
+            <h2>Нейроотличность</h2>
+            <p>
+              Интерфейс и процесс рассчитаны на низкую сенсорную нагрузку, предсказуемость, прямой язык и возможность
+              идти маленькими шагами.
+            </p>
+          </article>
         </div>
       </section>
 
-      <section id="services" class="section-grid">
-        <div class="section-head">
-          <h2>Услуги и цены</h2>
-          <p>Один источник данных для сайта, Telegram-бота и dashboard.</p>
+      <section class="page" data-page="prices" aria-labelledby="prices-title">
+        <div class="page-heading">
+          <p>/prices</p>
+          <h1 id="prices-title">Услуги и цены</h1>
+          <span>Без пакетов и давления. Стоимость можно обсудить, если доход ниже и цена становится нагрузкой.</span>
         </div>
-        <div id="servicesList" class="card-grid"></div>
+        <div class="price-table" aria-label="Основные условия оплаты">
+          <div><b>60 минут</b><strong>5000 ₽</strong></div>
+          <div><b>Дополнительные 30 минут</b><strong>+500 ₽</strong></div>
+          <div><b>Короткая связь между встречами</b><strong>бесплатно</strong></div>
+          <div><b>Если доход ниже</b><strong>цену можно обсудить</strong></div>
+        </div>
+        <p class="notice">Оплата после встречи. Никаких пакетов и обязательств.</p>
+        <div id="servicesList" class="services-list" aria-live="polite"></div>
       </section>
 
-      <section id="consent" class="consent-band">
-        <div class="section-head">
-          <h2>Согласие на обработку данных</h2>
-          <p>Читать сайт и статьи можно без согласия. Чат, запись, связка Telegram и хранение профиля доступны только после явного согласия.</p>
+      <section class="page" data-page="blog" aria-labelledby="blog-title">
+        <div class="page-heading">
+          <p>/blog</p>
+          <h1 id="blog-title">Блог</h1>
+          <span>Не маркетинговые карточки, а спокойная база знаний: инструкции, карты, стратегии и разбор паттернов.</span>
         </div>
-        <form id="consentForm" class="consent-form">
-          <label>Имя или псевдоним<input id="consentName" autocomplete="name" placeholder="Как к вам обращаться" /></label>
-          <label>Контакт для записи<input id="consentContact" autocomplete="email tel" placeholder="Telegram, телефон или email" /></label>
-          <label class="checkbox-line"><input id="consentAccepted" type="checkbox" /> <span>Я прочитал(а) текст согласия и понимаю, какие данные будут обработаны.</span></label>
-          <details>
-            <summary>Текст согласия и политики</summary>
-            <div id="consentText" class="legal-text"></div>
+        <div id="articlesList" class="article-list" aria-live="polite"></div>
+      </section>
+
+      <section class="page" data-page="article" aria-labelledby="article-title">
+        <article id="articleReader" class="article-reader"></article>
+      </section>
+
+      <section class="page" data-page="faq" aria-labelledby="faq-title">
+        <div class="page-heading">
+          <p>/faq</p>
+          <h1 id="faq-title">FAQ</h1>
+          <span>Короткие ответы на вопросы до записи.</span>
+        </div>
+        <div class="faq-list">
+          <details open>
+            <summary>Можно ли читать сайт без согласия?</summary>
+            <p>Да. Согласие нужно только для web-chat, записи, связи Telegram и хранения профиля.</p>
           </details>
-          <button type="submit">Принять согласие</button>
-          <p id="consentStatus" class="status-text"></p>
-        </form>
-        <div id="consentReady" class="consent-ready hidden">
-          <b>Согласие принято.</b>
-          <span>Теперь доступны web-chat, запись и связка с Telegram.</span>
+          <details>
+            <summary>Что происходит после сообщения в чат?</summary>
+            <p>Браузер отправляет текст на `/site/api/chat`, Worker сохраняет сообщение под site-session и возвращает ответ.</p>
+          </details>
+          <details>
+            <summary>Это замена срочной помощи?</summary>
+            <p>Нет. При риске для жизни или здоровья нужно обращаться в экстренные службы или к человеку рядом.</p>
+          </details>
+          <details>
+            <summary>Почему цена может меняться?</summary>
+            <p>Базовая цена прозрачная, но если доход клиента делает оплату обременительной, условия можно обсудить.</p>
+          </details>
         </div>
       </section>
 
-      <section id="chat" class="work-grid">
-        <div class="section-head">
-          <h2>Web-chat</h2>
-          <p>Сообщения после согласия видны в dashboard как site-клиент. Telegram-отправка включается только после явной deep-link связки.</p>
+      <section class="page" data-page="booking" aria-labelledby="booking-title">
+        <div class="page-heading">
+          <p>/booking</p>
+          <h1 id="booking-title">Запись</h1>
+          <span>Заявка создается с источником site и попадает в dashboard. Перед отправкой нужно принять согласие.</span>
         </div>
-        <div class="chat-surface">
-          <div id="chatLog" class="chat-log"></div>
-          <form id="chatForm" class="message-form">
-            <textarea id="chatText" rows="2" maxlength="1500" placeholder="Напишите вопрос или запрос на консультацию"></textarea>
-            <div id="turnstileChat" class="turnstile-box" data-turnstile-action="chat"></div>
-            <button type="submit">Отправить</button>
+        <div class="flow-grid">
+          <aside class="consent-gate" data-consent-panel></aside>
+          <form id="bookingForm" class="booking-form">
+            <label>Услуга<select id="bookingService"></select></label>
+            <label>Свободное время<select id="bookingSlot"></select></label>
+            <label>Имя<input id="bookingName" autocomplete="name" /></label>
+            <label>Контакт<input id="bookingContact" autocomplete="email tel" /></label>
+            <label>Запрос<textarea id="bookingRequest" rows="4" maxlength="1000"></textarea></label>
+            <div id="turnstileBooking" class="turnstile-box" data-turnstile-action="booking"></div>
+            <button class="dark-button" type="submit">Создать заявку</button>
+            <p id="bookingStatus" class="status-text"></p>
           </form>
-          <p id="chatStatus" class="status-text"></p>
         </div>
       </section>
 
-      <section id="booking" class="work-grid">
-        <div class="section-head">
-          <h2>Запись</h2>
-          <p>Заявка создается с источником <code>site</code> и попадает в dashboard.</p>
+      <section class="page" data-page="chat" aria-labelledby="chat-title">
+        <div class="page-heading">
+          <p>/chat</p>
+          <h1 id="chat-title">Web-chat</h1>
+          <span>Статический интерфейс отправляет сообщения на endpoint и получает ответы через `fetch` с cookies.</span>
         </div>
-        <form id="bookingForm" class="booking-form">
-          <label>Услуга<select id="bookingService"></select></label>
-          <label>Свободное время<select id="bookingSlot"></select></label>
-          <label>Имя<input id="bookingName" autocomplete="name" /></label>
-          <label>Контакт<input id="bookingContact" autocomplete="email tel" /></label>
-          <label>Запрос<textarea id="bookingRequest" rows="3" maxlength="1000"></textarea></label>
-          <div id="turnstileBooking" class="turnstile-box" data-turnstile-action="booking"></div>
-          <button type="submit">Создать заявку</button>
-          <p id="bookingStatus" class="status-text"></p>
-        </form>
+        <div class="flow-grid">
+          <aside class="consent-gate" data-consent-panel></aside>
+          <section class="chat-surface" aria-label="Диалог">
+            <div id="chatLog" class="chat-log"></div>
+            <form id="chatForm" class="message-form">
+              <textarea id="chatText" rows="3" maxlength="1500" placeholder="Напишите вопрос или запрос на консультацию"></textarea>
+              <div id="turnstileChat" class="turnstile-box" data-turnstile-action="chat"></div>
+              <button class="dark-button" type="submit">Отправить</button>
+            </form>
+            <p id="chatStatus" class="status-text"></p>
+          </section>
+        </div>
       </section>
 
-      <section id="telegram" class="band">
-        <div class="section-head">
-          <h2>Связать Telegram</h2>
-          <p>Сайт создает одноразовый deep-link. Cookie сама по себе не связывает профиль и Telegram.</p>
+      <section class="page" data-page="contacts" aria-labelledby="contacts-title">
+        <div class="page-heading">
+          <p>/contacts</p>
+          <h1 id="contacts-title">Контакты</h1>
+          <span>Два нормальных входа: записаться на время или начать с короткого сообщения.</span>
         </div>
-        <div class="telegram-link-panel">
+        <div class="contact-options">
+          <a class="line-button" href="/site/booking" data-link>Выбрать время в календаре</a>
+          <a class="line-button" href="/site/chat" data-link>Написать в чат</a>
+          <button id="createTelegramLink" class="line-button" type="button">Связать Telegram</button>
           <div id="turnstileLink" class="turnstile-box" data-turnstile-action="telegram_link"></div>
-          <button id="createTelegramLink" type="button">Создать ссылку Telegram</button>
           <p id="telegramStatus" class="status-text"></p>
         </div>
       </section>
 
-      <section id="articles" class="section-grid">
-        <div class="section-head">
-          <h2>Статьи</h2>
-          <p>Публикуются из dashboard после ручной проверки. В публичный JSON не попадают внутренние id и приватные поля.</p>
-        </div>
-        <div id="articlesList" class="article-list"></div>
-        <article id="articleReader" class="article-reader hidden"></article>
-      </section>
-
-      <section id="privacy" class="band privacy-band">
-        <div class="section-head">
-          <h2>Данные и прозрачность</h2>
-          <p>Базовый privacy-контур: информированное согласие, отдельная public API-зона, отсутствие приватных клиентских данных в публичных ответах.</p>
+      <section class="page" data-page="privacy" aria-labelledby="privacy-title">
+        <div class="page-heading">
+          <p>/privacy</p>
+          <h1 id="privacy-title">Данные и согласие</h1>
+          <span>Публичное чтение отдельно от интерактивных действий. Чат, запись и Telegram-link включаются только после согласия.</span>
         </div>
         <div id="privacyText" class="legal-text"></div>
       </section>
     </main>
 
-    <footer>
-      <span id="footerBrand">НейроПсихолог</span>
+    <footer class="site-footer">
+      <a class="footer-brand" href="/site/" data-link>/site</a>
+      <span>Психологическая работа для взрослых с РАС/СДВГ</span>
+      <a href="/site/approach" data-link>Подход</a>
+      <a href="/site/prices" data-link>Цены</a>
+      <a href="/site/blog" data-link>Блог</a>
+      <a href="/site/privacy" data-link>Политика конфиденциальности</a>
       <a id="footerTelegram" href="#" rel="noopener noreferrer" target="_blank">Telegram</a>
       <a id="footerGithub" href="#" rel="noopener noreferrer" target="_blank">GitHub</a>
     </footer>
 
-    <script src="/site/site.js?v=20260620-1" defer></script>
+    <template id="consentTemplate">
+      <form class="consent-form" data-consent-form>
+        <h2>Согласие</h2>
+        <p>Читать сайт можно без согласия. Для чата, записи и Telegram-link нужно явно принять условия.</p>
+        <label>Имя или псевдоним<input data-consent-name autocomplete="name" placeholder="Как к вам обращаться" /></label>
+        <label>Контакт для записи<input data-consent-contact autocomplete="email tel" placeholder="Telegram, телефон или email" /></label>
+        <label class="checkbox-line">
+          <input data-consent-accepted type="checkbox" />
+          <span>Я прочитал(а) текст согласия и понимаю, какие данные будут обработаны.</span>
+        </label>
+        <details>
+          <summary>Текст согласия и политики</summary>
+          <div class="legal-text" data-consent-text></div>
+        </details>
+        <button class="dark-button" type="submit">Принять согласие</button>
+        <p class="status-text" data-consent-status></p>
+      </form>
+    </template>
+
+    <script src="/site/site.js?v=20260620-2" defer></script>
   </body>
 </html>
