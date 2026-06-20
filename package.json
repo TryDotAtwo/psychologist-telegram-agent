@@ -4,9 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "check": "tsc --noEmit"
+    "build:assets": "node scripts/build-assets.js",
+    "dev": "npm run build:assets && wrangler dev",
+    "deploy": "npm run build:assets && wrangler deploy",
+    "check": "npm run build:assets && tsc --noEmit && node --check dashboard/app.js && node --check site/site.js"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260521.0",

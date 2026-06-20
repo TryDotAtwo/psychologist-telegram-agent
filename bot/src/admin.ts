@@ -9,6 +9,7 @@ import {
   storeOutboundAttachment
 } from "./outbound_messages";
 import { cancelReminder, createReminder, sendReminderNow, updateReminder } from "./reminders";
+import { handleAdminSiteApi, isSiteChatId, recordSiteAdminReply } from "./site";
 import {
   appendStoredJsonl,
   mergedProfile,
@@ -36,6 +37,9 @@ export async function handleAdminApi(request: Request, env: Env): Promise<Respon
   if (request.method === "GET" && url.pathname === "/api/auth/google") return startGoogleLogin(request, env);
   if (request.method === "GET" && url.pathname === "/api/auth/google/callback") return finishGoogleLogin(request, env);
   if (!authorized(request, env)) return Response.json({ error: "unauthorized" }, { status: 401 });
+
+  const siteApiResponse = await handleAdminSiteApi(request, env);
+  if (siteApiResponse) return siteApiResponse;
 
   if (request.method === "GET" && url.pathname === "/api/config") return Response.json(await readConfig(env));
   if (request.method === "GET" && url.pathname === "/api/ai/status") return Response.json(await aiStatus(env));
@@ -237,6 +241,12 @@ async function sendAdminReply(request: Request, env: Env, chatId: string): Promi
   const text = body.text?.trim();
   if (!text) return Response.json({ error: "empty_text" }, { status: 400 });
   if (text.length > 3500) return Response.json({ error: "text_too_long" }, { status: 400 });
+  if (isSiteChatId(chatId)) {
+    const createdAt = new Date().toISOString();
+    await recordSiteAdminReply(env, chatId, text, createdAt);
+    const client = (await readUsers(env)).find((item) => item.chatId === chatId);
+    return Response.json({ ok: true, siteOnly: true, createdAt, client: client ? { ...client, mergedProfile: mergedProfile(client) } : undefined });
+  }
   if (isFutureIso(body.scheduledAt)) {
     const message = await scheduleOutboundMessage(env, { chatId, text, dueAt: body.scheduledAt as string });
     if (!message) return Response.json({ error: "invalid_scheduled_message" }, { status: 400 });
@@ -260,6 +270,7 @@ async function sendAdminMediaReply(request: Request, env: Env, chatId: string): 
   const caption = stringFormValue(formData.get("caption")).trim().slice(0, 1024);
   const scheduledAt = stringFormValue(formData.get("scheduledAt"));
   const files = formData.getAll("files").filter((item): item is File => item instanceof File && isSupportedMediaFile(item));
+  if (isSiteChatId(chatId)) return Response.json({ error: "site_chat_media_not_supported" }, { status: 400 });
   if (!files.length) return Response.json({ error: "missing_media" }, { status: 400 });
   if (isFutureIso(scheduledAt)) {
     const pendingId = `pending_${crypto.randomUUID()}`;

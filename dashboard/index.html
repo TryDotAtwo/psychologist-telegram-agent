@@ -35,6 +35,7 @@
           <button data-section="calendar" data-icon="К" title="Календарь"><span>Календарь</span></button>
           <button data-section="prompts" data-icon="И" title="Инструкции"><span>Инструкции</span></button>
           <button data-section="services" data-icon="₽" title="Услуги"><span>Услуги</span></button>
+          <button data-section="site" data-icon="S" title="Сайт"><span>Сайт</span></button>
           <button data-section="google" data-icon="G" title="Google"><span>Google</span></button>
           <button data-section="security" data-icon="З" title="Безопасность"><span>Безопасность</span></button>
         </nav>
@@ -232,6 +233,79 @@
           <article class="panel">
             <div class="panel-head"><h2>Цены</h2><button id="addPrice">Добавить цену</button></div>
             <table><thead><tr><th>Услуга</th><th>Цена</th><th>Валюта</th><th>Примечание</th></tr></thead><tbody id="prices"></tbody></table>
+          </article>
+        </section>
+
+        <section class="panel-stack hidden-panel" data-section-panel="site">
+          <article class="panel">
+            <div class="panel-head">
+              <div><h2>Публичный сайт</h2><p>Настройки корня будущего публичного домена. Dashboard остается на /bot/.</p></div>
+              <button id="saveSiteConfig" type="button">Сохранить сайт</button>
+            </div>
+            <div class="site-admin-grid">
+              <label class="checkbox-line"><input id="siteEnabled" type="checkbox" /> сайт включен</label>
+              <label class="checkbox-line"><input id="siteWebBotEnabled" type="checkbox" /> web-chat включен</label>
+              <label>Название<input id="siteBrandName" /></label>
+              <label>Telegram URL<input id="siteTelegramUrl" /></label>
+              <label>GitHub URL<input id="siteGithubUrl" /></label>
+              <label>Turnstile site key<input id="siteTurnstileSiteKey" placeholder="public site key, secret хранится отдельно" /></label>
+              <label>Заголовок<input id="siteHeadline" /></label>
+              <label>Подзаголовок<input id="siteSubheadline" /></label>
+              <label class="wide">Bio<textarea id="siteBio" rows="4"></textarea></label>
+              <label>Версия согласия<input id="siteConsentVersion" /></label>
+              <label class="wide">Текст согласия<textarea id="siteConsentText" rows="6"></textarea></label>
+              <label class="wide">Политика обработки данных<textarea id="sitePrivacyText" rows="6"></textarea></label>
+              <label class="wide">Инструкции article-agent<textarea id="siteArticleAgentInstructions" rows="6"></textarea></label>
+            </div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head">
+              <div><h2>Статьи и cover images</h2><p>AI создает только draft из публичного контекста. Публикация всегда ручная.</p></div>
+              <div class="button-row">
+                <button id="createArticleDraft" type="button">Новый draft</button>
+                <button id="generateArticleDraft" type="button">AI draft</button>
+              </div>
+            </div>
+            <div class="article-ai-row">
+              <label>Тема<input id="articleTopic" placeholder="Например: как подготовиться к первой консультации" /></label>
+              <label>Тон<input id="articleTone" placeholder="спокойный, структурный, без медицинских обещаний" /></label>
+            </div>
+            <div class="site-cms-layout">
+              <aside>
+                <h3>Материалы</h3>
+                <div id="siteArticleList" class="article-list-admin"></div>
+              </aside>
+              <section class="article-editor">
+                <div class="article-editor-head">
+                  <h3>Редактор</h3>
+                  <span id="siteArticleStatus" class="status-pill">draft</span>
+                </div>
+                <label>Заголовок<input id="articleTitle" /></label>
+                <label>Slug<input id="articleSlug" /></label>
+                <label>Summary<textarea id="articleSummary" rows="3"></textarea></label>
+                <label>Tags<input id="articleTags" placeholder="запись, РАС, СДВГ" /></label>
+                <label>SEO title<input id="articleSeoTitle" /></label>
+                <label>SEO description<textarea id="articleSeoDescription" rows="2"></textarea></label>
+                <label>Body Markdown<textarea id="articleBody" rows="14"></textarea></label>
+                <div class="cover-tools">
+                  <label>Cover upload<input id="articleCoverFile" type="file" accept="image/*" /></label>
+                  <button id="uploadArticleCover" type="button">Загрузить cover</button>
+                  <label>Image prompt<input id="articleImagePrompt" placeholder="Editorial cover, no text, no logo" /></label>
+                  <button id="generateArticleImage" type="button">Generate image</button>
+                </div>
+                <div class="button-row">
+                  <button id="saveArticle" type="button">Сохранить draft</button>
+                  <button id="publishArticle" type="button">Опубликовать</button>
+                  <button id="unpublishArticle" class="secondary" type="button">Снять с публикации</button>
+                </div>
+                <p id="articleEditorStatus" class="hint"></p>
+              </section>
+              <section class="article-preview">
+                <h3>Preview</h3>
+                <div id="articlePreview"></div>
+              </section>
+            </div>
           </article>
         </section>
 

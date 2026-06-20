@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>НейроПсихолог</title>
+    <meta name="description" content="Публичный сайт, web-chat, запись и Telegram-бот психолога." />
+    <link rel="stylesheet" href="/site/site.css?v=20260620-1" />
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="На главную">
+        <span class="brand-mark">Ψ</span>
+        <span id="brandName">НейроПсихолог</span>
+      </a>
+      <nav aria-label="Разделы сайта">
+        <a href="#services">Услуги</a>
+        <a href="#chat">Чат</a>
+        <a href="#booking">Запись</a>
+        <a href="#articles">Статьи</a>
+        <a href="#privacy">Данные</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">web-chat · Telegram · запись</p>
+          <h1 id="siteHeadline">Психологическая консультация с бережным входом через бота</h1>
+          <p id="siteSubheadline" class="lead">Можно сначала задать вопрос, посмотреть услуги и выбрать свободное время.</p>
+          <div class="hero-actions">
+            <a class="primary" href="#chat">Открыть чат</a>
+            <a class="secondary" href="#booking">Выбрать время</a>
+          </div>
+        </div>
+        <aside class="hero-panel" aria-label="Краткий статус сервиса">
+          <div class="status-dot"></div>
+          <h2>Публичный контур</h2>
+          <p>Сайт использует отдельные public API, отдельную site-session cookie и явное согласие перед чатом, записью и связкой Telegram.</p>
+          <a id="githubLink" href="#" rel="noopener noreferrer" target="_blank">GitHub проекта</a>
+        </aside>
+      </section>
+
+      <section id="about" class="band">
+        <div class="section-head">
+          <h2>О формате</h2>
+          <p id="siteBio">Короткое описание специалиста и формата консультаций загружается из dashboard.</p>
+        </div>
+      </section>
+
+      <section id="services" class="section-grid">
+        <div class="section-head">
+          <h2>Услуги и цены</h2>
+          <p>Один источник данных для сайта, Telegram-бота и dashboard.</p>
+        </div>
+        <div id="servicesList" class="card-grid"></div>
+      </section>
+
+      <section id="consent" class="consent-band">
+        <div class="section-head">
+          <h2>Согласие на обработку данных</h2>
+          <p>Читать сайт и статьи можно без согласия. Чат, запись, связка Telegram и хранение профиля доступны только после явного согласия.</p>
+        </div>
+        <form id="consentForm" class="consent-form">
+          <label>Имя или псевдоним<input id="consentName" autocomplete="name" placeholder="Как к вам обращаться" /></label>
+          <label>Контакт для записи<input id="consentContact" autocomplete="email tel" placeholder="Telegram, телефон или email" /></label>
+          <label class="checkbox-line"><input id="consentAccepted" type="checkbox" /> <span>Я прочитал(а) текст согласия и понимаю, какие данные будут обработаны.</span></label>
+          <details>
+            <summary>Текст согласия и политики</summary>
+            <div id="consentText" class="legal-text"></div>
+          </details>
+          <button type="submit">Принять согласие</button>
+          <p id="consentStatus" class="status-text"></p>
+        </form>
+        <div id="consentReady" class="consent-ready hidden">
+          <b>Согласие принято.</b>
+          <span>Теперь доступны web-chat, запись и связка с Telegram.</span>
+        </div>
+      </section>
+
+      <section id="chat" class="work-grid">
+        <div class="section-head">
+          <h2>Web-chat</h2>
+          <p>Сообщения после согласия видны в dashboard как site-клиент. Telegram-отправка включается только после явной deep-link связки.</p>
+        </div>
+        <div class="chat-surface">
+          <div id="chatLog" class="chat-log"></div>
+          <form id="chatForm" class="message-form">
+            <textarea id="chatText" rows="2" maxlength="1500" placeholder="Напишите вопрос или запрос на консультацию"></textarea>
+            <div id="turnstileChat" class="turnstile-box" data-turnstile-action="chat"></div>
+            <button type="submit">Отправить</button>
+          </form>
+          <p id="chatStatus" class="status-text"></p>
+        </div>
+      </section>
+
+      <section id="booking" class="work-grid">
+        <div class="section-head">
+          <h2>Запись</h2>
+          <p>Заявка создается с источником <code>site</code> и попадает в dashboard.</p>
+        </div>
+        <form id="bookingForm" class="booking-form">
+          <label>Услуга<select id="bookingService"></select></label>
+          <label>Свободное время<select id="bookingSlot"></select></label>
+          <label>Имя<input id="bookingName" autocomplete="name" /></label>
+          <label>Контакт<input id="bookingContact" autocomplete="email tel" /></label>
+          <label>Запрос<textarea id="bookingRequest" rows="3" maxlength="1000"></textarea></label>
+          <div id="turnstileBooking" class="turnstile-box" data-turnstile-action="booking"></div>
+          <button type="submit">Создать заявку</button>
+          <p id="bookingStatus" class="status-text"></p>
+        </form>
+      </section>
+
+      <section id="telegram" class="band">
+        <div class="section-head">
+          <h2>Связать Telegram</h2>
+          <p>Сайт создает одноразовый deep-link. Cookie сама по себе не связывает профиль и Telegram.</p>
+        </div>
+        <div class="telegram-link-panel">
+          <div id="turnstileLink" class="turnstile-box" data-turnstile-action="telegram_link"></div>
+          <button id="createTelegramLink" type="button">Создать ссылку Telegram</button>
+          <p id="telegramStatus" class="status-text"></p>
+        </div>
+      </section>
+
+      <section id="articles" class="section-grid">
+        <div class="section-head">
+          <h2>Статьи</h2>
+          <p>Публикуются из dashboard после ручной проверки. В публичный JSON не попадают внутренние id и приватные поля.</p>
+        </div>
+        <div id="articlesList" class="article-list"></div>
+        <article id="articleReader" class="article-reader hidden"></article>
+      </section>
+
+      <section id="privacy" class="band privacy-band">
+        <div class="section-head">
+          <h2>Данные и прозрачность</h2>
+          <p>Базовый privacy-контур: информированное согласие, отдельная public API-зона, отсутствие приватных клиентских данных в публичных ответах.</p>
+        </div>
+        <div id="privacyText" class="legal-text"></div>
+      </section>
+    </main>
+
+    <footer>
+      <span id="footerBrand">НейроПсихолог</span>
+      <a id="footerTelegram" href="#" rel="noopener noreferrer" target="_blank">Telegram</a>
+      <a id="footerGithub" href="#" rel="noopener noreferrer" target="_blank">GitHub</a>
+    </footer>
+
+    <script src="/site/site.js?v=20260620-1" defer></script>
+  </body>
+</html>

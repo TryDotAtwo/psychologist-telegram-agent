@@ -5,7 +5,10 @@ let busy = [];
 let bookings = [];
 let users = [];
 let reminders = [];
+let siteConfig = null;
+let siteArticles = [];
 let selectedClientId = null;
+let selectedSiteArticleId = null;
 let selectedAvailabilityId = null;
 let refreshTimer = null;
 let messageRefreshTimer = null;
@@ -59,6 +62,7 @@ const sectionMeta = {
   calendar: ["Календарь", "Рабочие часы, свободные окна, занятость Google и бронирования."],
   prompts: ["Инструкции", "Промпт, память и режим веб-поиска."],
   services: ["Услуги", "Услуги, длительность, цены и примечания."],
+  site: ["Сайт", "Публичный сайт, web-chat, согласие, статьи, preview и публикация."],
   google: ["Google", "Подключение аккаунта, календаря и синхронизация занятости."],
   security: ["Безопасность", "Кризисные правила, доступ и границы ответственности."]
 };
@@ -99,12 +103,14 @@ async function checkSession() {
 async function load() {
   setupGoogleLinks();
   const duration = Number(document.getElementById("availabilityDuration")?.value || 30);
-  [config, schedule, users, bookings, reminders] = await Promise.all([
+  [config, schedule, users, bookings, reminders, siteConfig, siteArticles] = await Promise.all([
     api("/api/config"),
     api("/api/calendar/schedule"),
     api("/api/users").catch(() => []),
     api("/api/calendar/bookings").catch(() => []),
-    api("/api/reminders").catch(() => [])
+    api("/api/reminders").catch(() => []),
+    api("/api/site/config").catch(() => null),
+    api("/api/site/articles").catch(() => [])
   ]);
   await loadAvailability(duration);
   seedAttentionNotifications(users);
@@ -174,6 +180,7 @@ function renderAll() {
   renderConfig();
   renderServices();
   renderPrices();
+  renderSite();
   renderWeeklySchedule();
   renderCalendarBoard();
   renderOverview();
@@ -264,6 +271,17 @@ function setupStaticHandlers() {
   document.getElementById("addReminder").onclick = addManualReminder;
   document.getElementById("addService").onclick = addService;
   document.getElementById("addPrice").onclick = addPrice;
+  document.getElementById("saveSiteConfig").onclick = saveSiteConfig;
+  document.getElementById("createArticleDraft").onclick = createArticleDraft;
+  document.getElementById("generateArticleDraft").onclick = generateArticleDraft;
+  document.getElementById("saveArticle").onclick = saveSelectedArticle;
+  document.getElementById("publishArticle").onclick = publishSelectedArticle;
+  document.getElementById("unpublishArticle").onclick = unpublishSelectedArticle;
+  document.getElementById("uploadArticleCover").onclick = uploadArticleCover;
+  document.getElementById("generateArticleImage").onclick = generateArticleImage;
+  document.getElementById("articleBody").addEventListener("input", renderArticlePreview);
+  document.getElementById("articleTitle").addEventListener("input", renderArticlePreview);
+  document.getElementById("articleSummary").addEventListener("input", renderArticlePreview);
 }
 
 function initTheme() {
@@ -424,6 +442,243 @@ function addPrice() {
   collectConfig();
   config.prices.push({ serviceId: config.services[0]?.id || "service", amount: 0, currency: "RUB", note: "" });
   renderPrices();
+}
+
+function renderSite() {
+  if (!siteConfig) return;
+  document.getElementById("siteEnabled").checked = Boolean(siteConfig.enabled);
+  document.getElementById("siteWebBotEnabled").checked = Boolean(siteConfig.webBotEnabled);
+  document.getElementById("siteBrandName").value = siteConfig.brandName || "";
+  document.getElementById("siteHeadline").value = siteConfig.headline || "";
+  document.getElementById("siteSubheadline").value = siteConfig.subheadline || "";
+  document.getElementById("siteBio").value = siteConfig.bio || "";
+  document.getElementById("siteTelegramUrl").value = siteConfig.telegramUrl || "";
+  document.getElementById("siteGithubUrl").value = siteConfig.githubUrl || "";
+  document.getElementById("siteTurnstileSiteKey").value = siteConfig.turnstileSiteKey || "";
+  document.getElementById("siteConsentVersion").value = siteConfig.consentVersion || "";
+  document.getElementById("siteConsentText").value = siteConfig.consentText || "";
+  document.getElementById("sitePrivacyText").value = siteConfig.privacyText || "";
+  document.getElementById("siteArticleAgentInstructions").value = siteConfig.articleAgentInstructions || "";
+  if (!selectedSiteArticleId && siteArticles[0]) selectedSiteArticleId = siteArticles[0].id;
+  renderSiteArticlesList();
+  renderArticleEditor();
+}
+
+function collectSiteConfig() {
+  if (!siteConfig) return null;
+  siteConfig.enabled = document.getElementById("siteEnabled").checked;
+  siteConfig.webBotEnabled = document.getElementById("siteWebBotEnabled").checked;
+  siteConfig.brandName = document.getElementById("siteBrandName").value.trim();
+  siteConfig.headline = document.getElementById("siteHeadline").value.trim();
+  siteConfig.subheadline = document.getElementById("siteSubheadline").value.trim();
+  siteConfig.bio = document.getElementById("siteBio").value.trim();
+  siteConfig.telegramUrl = document.getElementById("siteTelegramUrl").value.trim();
+  siteConfig.githubUrl = document.getElementById("siteGithubUrl").value.trim();
+  siteConfig.turnstileSiteKey = document.getElementById("siteTurnstileSiteKey").value.trim();
+  siteConfig.consentVersion = document.getElementById("siteConsentVersion").value.trim();
+  siteConfig.consentText = document.getElementById("siteConsentText").value.trim();
+  siteConfig.privacyText = document.getElementById("sitePrivacyText").value.trim();
+  siteConfig.articleAgentInstructions = document.getElementById("siteArticleAgentInstructions").value.trim();
+  return siteConfig;
+}
+
+async function saveSiteConfig() {
+  const nextConfig = collectSiteConfig();
+  if (!nextConfig) return;
+  const result = await api("/api/site/config", { method: "PUT", body: JSON.stringify(nextConfig) });
+  siteConfig = result.config || nextConfig;
+  document.getElementById("saveStatus").textContent = "Публичный сайт сохранен.";
+  renderSite();
+}
+
+function renderSiteArticlesList() {
+  const root = document.getElementById("siteArticleList");
+  const sorted = [...siteArticles].sort((a, b) => Date.parse(b.updatedAt || b.createdAt || "") - Date.parse(a.updatedAt || a.createdAt || ""));
+  root.innerHTML = sorted.length
+    ? sorted.map((article) => `
+      <button class="article-row-admin ${article.id === selectedSiteArticleId ? "active" : ""}" data-site-article-id="${escapeAttr(article.id)}">
+        <span>
+          <b>${escapeHtml(article.title || "Без названия")}</b>
+          <small>${escapeHtml(article.slug || "")}</small>
+        </span>
+        <em class="status-pill ${article.status === "published" ? "free" : "busy"}">${articleStatusLabel(article)}</em>
+      </button>
+    `).join("")
+    : `<div class="empty-state">Черновиков пока нет.</div>`;
+  root.querySelectorAll("[data-site-article-id]").forEach((button) => {
+    button.onclick = () => {
+      selectedSiteArticleId = button.dataset.siteArticleId;
+      renderSiteArticlesList();
+      renderArticleEditor();
+    };
+  });
+}
+
+function renderArticleEditor() {
+  const article = selectedSiteArticle();
+  const disabled = !article;
+  ["articleTitle", "articleSlug", "articleSummary", "articleTags", "articleSeoTitle", "articleSeoDescription", "articleBody", "articleImagePrompt"].forEach((id) => {
+    document.getElementById(id).disabled = disabled;
+  });
+  ["saveArticle", "publishArticle", "unpublishArticle", "uploadArticleCover", "generateArticleImage"].forEach((id) => {
+    document.getElementById(id).disabled = disabled;
+  });
+  if (!article) {
+    document.getElementById("siteArticleStatus").textContent = "нет draft";
+    document.getElementById("articlePreview").innerHTML = `<div class="empty-state">Выберите или создайте статью.</div>`;
+    return;
+  }
+  document.getElementById("siteArticleStatus").textContent = articleStatusLabel(article);
+  document.getElementById("articleTitle").value = article.title || "";
+  document.getElementById("articleSlug").value = article.slug || "";
+  document.getElementById("articleSummary").value = article.summary || "";
+  document.getElementById("articleTags").value = (article.tags || []).join(", ");
+  document.getElementById("articleSeoTitle").value = article.seoTitle || "";
+  document.getElementById("articleSeoDescription").value = article.seoDescription || "";
+  document.getElementById("articleBody").value = article.bodyMarkdown || "";
+  document.getElementById("articleImagePrompt").value = "";
+  document.getElementById("articleEditorStatus").textContent = article.coverImageUrl ? `Cover: ${article.coverImageUrl}` : "";
+  renderArticlePreview();
+}
+
+function selectedSiteArticle() {
+  return siteArticles.find((article) => article.id === selectedSiteArticleId) || null;
+}
+
+function collectArticlePatch() {
+  return {
+    title: document.getElementById("articleTitle").value.trim(),
+    slug: document.getElementById("articleSlug").value.trim(),
+    summary: document.getElementById("articleSummary").value.trim(),
+    tags: document.getElementById("articleTags").value.split(",").map((item) => item.trim()).filter(Boolean),
+    seoTitle: document.getElementById("articleSeoTitle").value.trim(),
+    seoDescription: document.getElementById("articleSeoDescription").value.trim(),
+    bodyMarkdown: document.getElementById("articleBody").value.trim()
+  };
+}
+
+async function createArticleDraft() {
+  const article = await api("/api/site/articles", {
+    method: "POST",
+    body: JSON.stringify({ title: "Новая статья", bodyMarkdown: "## Черновик\n\nТекст статьи.", status: "draft" })
+  });
+  siteArticles = [article, ...siteArticles.filter((item) => item.id !== article.id)];
+  selectedSiteArticleId = article.id;
+  renderSite();
+  document.getElementById("articleEditorStatus").textContent = "Draft создан.";
+}
+
+async function generateArticleDraft() {
+  document.getElementById("articleEditorStatus").textContent = "AI готовит draft из публичного контекста...";
+  const article = await api("/api/site/articles/generate", {
+    method: "POST",
+    body: JSON.stringify({
+      topic: document.getElementById("articleTopic").value.trim(),
+      tone: document.getElementById("articleTone").value.trim()
+    })
+  });
+  siteArticles = [article, ...siteArticles.filter((item) => item.id !== article.id)];
+  selectedSiteArticleId = article.id;
+  renderSite();
+  document.getElementById("articleEditorStatus").textContent = "AI draft создан. Проверьте перед публикацией.";
+}
+
+async function saveSelectedArticle() {
+  const article = selectedSiteArticle();
+  if (!article) return;
+  const updated = await api(`/api/site/articles/${encodeURIComponent(article.id)}`, { method: "PUT", body: JSON.stringify(collectArticlePatch()) });
+  siteArticles = siteArticles.map((item) => (item.id === updated.id ? updated : item));
+  selectedSiteArticleId = updated.id;
+  renderSite();
+  document.getElementById("articleEditorStatus").textContent = "Статья сохранена.";
+}
+
+async function publishSelectedArticle() {
+  const article = selectedSiteArticle();
+  if (!article) return;
+  await saveSelectedArticle();
+  const published = await api(`/api/site/articles/${encodeURIComponent(article.id)}/publish`, { method: "POST", body: "{}" });
+  siteArticles = siteArticles.map((item) => (item.id === published.id ? published : item));
+  selectedSiteArticleId = published.id;
+  renderSite();
+  document.getElementById("articleEditorStatus").textContent = "Статья опубликована.";
+}
+
+async function unpublishSelectedArticle() {
+  const article = selectedSiteArticle();
+  if (!article) return;
+  const draft = await api(`/api/site/articles/${encodeURIComponent(article.id)}/unpublish`, { method: "POST", body: "{}" });
+  siteArticles = siteArticles.map((item) => (item.id === draft.id ? draft : item));
+  selectedSiteArticleId = draft.id;
+  renderSite();
+  document.getElementById("articleEditorStatus").textContent = "Статья снята с публикации.";
+}
+
+async function uploadArticleCover() {
+  const article = selectedSiteArticle();
+  const file = document.getElementById("articleCoverFile").files[0];
+  if (!article || !file) {
+    document.getElementById("articleEditorStatus").textContent = "Выберите image-файл.";
+    return;
+  }
+  const form = new FormData();
+  form.set("file", file);
+  const updated = await apiForm(`/api/site/articles/${encodeURIComponent(article.id)}/cover`, form);
+  siteArticles = siteArticles.map((item) => (item.id === updated.id ? updated : item));
+  selectedSiteArticleId = updated.id;
+  renderSite();
+  document.getElementById("articleEditorStatus").textContent = "Cover загружен в R2.";
+}
+
+async function generateArticleImage() {
+  const article = selectedSiteArticle();
+  if (!article) return;
+  document.getElementById("articleEditorStatus").textContent = "Генерирую cover image...";
+  const updated = await api(`/api/site/articles/${encodeURIComponent(article.id)}/generate-image`, {
+    method: "POST",
+    body: JSON.stringify({ prompt: document.getElementById("articleImagePrompt").value.trim() })
+  });
+  if (updated.error) {
+    document.getElementById("articleEditorStatus").textContent = updated.message || updated.error;
+    return;
+  }
+  siteArticles = siteArticles.map((item) => (item.id === updated.id ? updated : item));
+  selectedSiteArticleId = updated.id;
+  renderSite();
+  document.getElementById("articleEditorStatus").textContent = "Cover image сохранен в R2.";
+}
+
+function renderArticlePreview() {
+  const title = document.getElementById("articleTitle").value.trim() || "Без названия";
+  const summary = document.getElementById("articleSummary").value.trim();
+  const body = document.getElementById("articleBody").value.trim();
+  const current = selectedSiteArticle();
+  document.getElementById("articlePreview").innerHTML = `
+    ${current?.coverImageUrl ? `<img class="article-preview-cover" src="${escapeAttr(current.coverImageUrl)}" alt="" />` : ""}
+    <h2>${escapeHtml(title)}</h2>
+    ${summary ? `<p>${escapeHtml(summary)}</p>` : ""}
+    <div class="markdown-preview">${dashboardMarkdownToHtml(body)}</div>
+  `;
+}
+
+function dashboardMarkdownToHtml(markdown) {
+  const blocks = String(markdown || "").split(/\n{2,}/).map((block) => block.trim()).filter(Boolean);
+  return blocks.map((block) => {
+    if (block.startsWith("### ")) return `<h4>${escapeHtml(block.slice(4))}</h4>`;
+    if (block.startsWith("## ")) return `<h3>${escapeHtml(block.slice(3))}</h3>`;
+    if (block.startsWith("# ")) return `<h2>${escapeHtml(block.slice(2))}</h2>`;
+    if (block.split("\n").every((line) => line.startsWith("- "))) {
+      return `<ul>${block.split("\n").map((line) => `<li>${escapeHtml(line.slice(2))}</li>`).join("")}</ul>`;
+    }
+    return `<p>${escapeHtml(block).replace(/\n/g, "<br />")}</p>`;
+  }).join("");
+}
+
+function articleStatusLabel(article) {
+  if (!article) return "draft";
+  if (article.status === "published") return "published";
+  if (article.status === "archived") return "archived";
+  return "draft";
 }
 
 function renderWeeklySchedule() {

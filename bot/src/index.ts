@@ -13,6 +13,7 @@ import { ChatMemory, memoryStub } from "./memory";
 import { answerWithOpenAI } from "./openai";
 import { processScheduledOutboundMessages } from "./outbound_messages";
 import { handleReminderFollowUpResponse, processDueReminders } from "./reminders";
+import { consumeSiteTelegramStart, fetchSiteAsset, handleSiteApi } from "./site";
 import { appendStoredJsonl, appendTranscriptMessage, mergedProfile, readConfig, readUsers, upsertClient } from "./storage";
 import { escapeTelegramHtml, formatAvailability, sendTelegramChatAction, sendTelegramMessage } from "./telegram";
 import type { BotConfig, ClientSummary, Env, TelegramUpdate } from "./types";
@@ -35,11 +36,12 @@ export default {
       return handleAdminApi(nextRequest, env);
     }
     if (url.pathname === "/bot/health") return Response.json({ ok: true, service: env.PUBLIC_BOT_NAME });
+    if (url.pathname.startsWith("/site/api/")) return handleSiteApi(request, env);
     if (url.pathname.startsWith("/api/")) return handleAdminApi(request, env);
     if (url.pathname === "/health") return Response.json({ ok: true, service: env.PUBLIC_BOT_NAME });
     if (url.pathname === "/telegram/webhook") return handleTelegramWebhook(request, env, ctx);
     if (url.pathname === "/bot" || url.pathname.startsWith("/bot/")) return fetchDashboardAsset(request, env);
-    return env.ASSETS.fetch(request);
+    return fetchSiteAsset(request, env);
   },
 
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
@@ -126,6 +128,18 @@ async function handleText(incoming: RecordedIncomingText, env: Env, ctx: Executi
       createdAt: receivedAt
     });
     return;
+  }
+
+  const siteStart = text.match(/^\/start\s+site_([a-zA-Z0-9_-]{16,128})$/);
+  if (!answer && siteStart) {
+    const linked = await consumeSiteTelegramStart(env, siteStart[1], chatId, {
+      username: baseClient.username,
+      firstName: baseClient.firstName,
+      lastName: baseClient.lastName
+    });
+    answer = linked
+      ? "Сайт и Telegram связаны. Теперь можно продолжить диалог здесь, а психолог увидит контекст сайта в панели."
+      : "Ссылка для связи сайта и Telegram устарела или уже использована. Вернитесь на сайт и создайте новую ссылку.";
   }
 
   if (!answer) {

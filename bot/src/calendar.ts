@@ -56,7 +56,8 @@ export async function createBooking(
     chatId?: string;
     clientName?: string;
     durationMinutes: number;
-    source: "bot" | "admin";
+    serviceId?: string;
+    source: "bot" | "admin" | "site";
     status?: "held" | "booked";
   }
 ): Promise<Booking | null> {
@@ -82,6 +83,7 @@ export async function createBooking(
       startsAt: window.startsAt,
       endsAt: window.endsAt,
       durationMinutes: input.durationMinutes,
+      serviceId: input.serviceId,
       status: input.status ?? "held",
       source: input.source,
       createdAt: now,

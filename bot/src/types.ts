@@ -50,7 +50,7 @@ export type WorkSchedule = {
 };
 
 export type BookingStatus = "held" | "booked" | "cancelled";
-export type BookingSource = "bot" | "admin";
+export type BookingSource = "bot" | "admin" | "site";
 
 export type Booking = {
   id: string;
@@ -59,11 +59,89 @@ export type Booking = {
   startsAt: string;
   endsAt: string;
   durationMinutes: number;
+  serviceId?: string;
   status: BookingStatus;
   source: BookingSource;
   googleEventId?: string;
   createdAt: string;
   updatedAt: string;
+};
+
+export type SiteConfig = {
+  enabled: boolean;
+  webBotEnabled: boolean;
+  brandName: string;
+  headline: string;
+  subheadline: string;
+  bio: string;
+  telegramUrl: string;
+  githubUrl: string;
+  consentVersion: string;
+  consentText: string;
+  privacyText: string;
+  articleAgentInstructions: string;
+  turnstileSiteKey?: string;
+};
+
+export type SiteArticleStatus = "draft" | "published" | "archived";
+
+export type SiteArticle = {
+  id: string;
+  slug: string;
+  title: string;
+  summary: string;
+  bodyMarkdown: string;
+  status: SiteArticleStatus;
+  tags: string[];
+  coverImageKey?: string;
+  coverImageUrl?: string;
+  seoTitle?: string;
+  seoDescription?: string;
+  createdAt: string;
+  updatedAt: string;
+  publishedAt?: string;
+};
+
+export type SiteSession = {
+  id: string;
+  createdAt: string;
+  expiresAt: string;
+  consentVersion?: string;
+  consentAcceptedAt?: string;
+  linkedTelegramChatId?: string;
+  name?: string;
+  contact?: string;
+};
+
+export type ConsentRecord = {
+  id: string;
+  siteSessionId: string;
+  consentVersion: string;
+  consentText: string;
+  privacyText: string;
+  acceptedAt: string;
+};
+
+export type SiteLinkToken = {
+  tokenHash: string;
+  siteSessionId: string;
+  createdAt: string;
+  expiresAt: string;
+  consumedAt?: string;
+  telegramChatId?: string;
+};
+
+export type SiteTranscriptMessage = {
+  role: "user" | "assistant";
+  text: string;
+  createdAt: string;
+  source: "site" | "bot" | "admin";
+};
+
+export type SiteRateBucket = {
+  key: string;
+  windowStartedAt: string;
+  count: number;
 };
 
 export type GoogleBusyEvent = {
@@ -235,6 +313,9 @@ export type Env = {
   OPENROUTER_API_KEY?: string;
   OPENROUTER_MODEL?: string;
   OPENROUTER_BASE_URL?: string;
+  TURNSTILE_SECRET_KEY?: string;
+  TURNSTILE_SITE_KEY?: string;
+  SITE_PUBLIC_HOST?: string;
   GOOGLE_CALENDAR_ID?: string;
   GOOGLE_CALENDAR_SERVICE_ACCOUNT_JSON?: string;
   GOOGLE_CLIENT_ID?: string;
