@@ -6,10 +6,10 @@
     <title>Карта жизни</title>
     <meta
       name="description"
-      content="Многостраничный сайт психологической работы для взрослых с РАС/СДВГ: подход, цены, блог, запись и web-chat."
+      content="Многостраничный сайт психологической работы для взрослых с РАС/СДВГ: подход, цены, блог, запись и чат."
     />
     <link rel="preload" as="image" href="/site/assets/life-map-reference.png" />
-    <link rel="stylesheet" href="/site/site.css?v=20260620-2" />
+    <link rel="stylesheet" href="/site/site.css?v=20260620-3" />
     <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
   </head>
   <body>
@@ -50,7 +50,16 @@
             </div>
           </div>
           <figure class="map-figure">
-            <img src="/site/assets/life-map-reference.png" alt="Карта маршрута от точки А к жизни по своим правилам" />
+            <div class="map-art" aria-label="Карта маршрута от точки А к жизни по своим правилам">
+              <img src="/site/assets/life-map-reference.png" alt="" />
+              <svg class="water-animation" viewBox="0 0 1006 320" aria-hidden="true" focusable="false">
+                <path class="river-flow river-flow-a" d="M392 72 C430 82 441 103 416 126 C395 146 399 164 435 178 C468 191 470 217 433 238" />
+                <path class="river-flow river-flow-b" d="M415 82 C447 100 444 124 425 145 C410 162 421 181 453 193 C482 204 480 225 450 248" />
+                <path class="lake-wave lake-wave-a" d="M190 212 C232 186 318 184 374 205 C348 231 240 239 190 212" />
+                <path class="lake-wave lake-wave-b" d="M224 226 C263 208 330 208 361 224 C328 244 258 246 224 226" />
+                <path class="lake-wave lake-wave-c" d="M250 197 C286 181 346 184 385 200" />
+              </svg>
+            </div>
           </figure>
         </div>
 
@@ -98,7 +107,7 @@
         <div class="page-heading">
           <p>/approach</p>
           <h1 id="approach-title">Как проходит работа</h1>
-          <span>Референсный блок перенесен 1:1 по композиции: понять паттерн, собрать карту, тренировать самостоятельность.</span>
+          <span>Работа строится как понятная последовательность: увидеть повторяющийся паттерн, собрать личную карту и постепенно перенести систему в реальную жизнь.</span>
         </div>
         <img class="wide-reference" src="/site/assets/work-process-reference.png" alt="Как проходит работа" />
         <div class="three-columns">
@@ -156,6 +165,11 @@
             </p>
           </article>
         </div>
+        <div class="reference-strip" aria-label="Визуальные образы подхода">
+          <img src="/site/assets/mask-map-reference.png" alt="Человек держит карту и маску" />
+          <img src="/site/assets/mask-reference.png" alt="Человек снимает маску" />
+          <img src="/site/assets/face-reference.png" alt="Минималистичный портрет в линию" />
+        </div>
       </section>
 
       <section class="page" data-page="prices" aria-labelledby="prices-title">
@@ -196,11 +210,11 @@
         <div class="faq-list">
           <details open>
             <summary>Можно ли читать сайт без согласия?</summary>
-            <p>Да. Согласие нужно только для web-chat, записи, связи Telegram и хранения профиля.</p>
+            <p>Да. Страницы и блог открыты без согласия. Согласие нужно только для чата, записи, связи Telegram и хранения данных, которые вы сами передаете.</p>
           </details>
           <details>
             <summary>Что происходит после сообщения в чат?</summary>
-            <p>Браузер отправляет текст на `/site/api/chat`, Worker сохраняет сообщение под site-session и возвращает ответ.</p>
+            <p>Сообщение сохраняется в рамках текущего обращения, чтобы не потерять контекст. Если запрос требует личного ответа, психолог увидит его в панели и сможет продолжить диалог вручную.</p>
           </details>
           <details>
             <summary>Это замена срочной помощи?</summary>
@@ -217,7 +231,7 @@
         <div class="page-heading">
           <p>/booking</p>
           <h1 id="booking-title">Запись</h1>
-          <span>Заявка создается с источником site и попадает в dashboard. Перед отправкой нужно принять согласие.</span>
+          <span>Выберите формат и свободное окно. После отправки психолог подтвердит встречу и при необходимости уточнит детали.</span>
         </div>
         <div class="flow-grid">
           <aside class="consent-gate" data-consent-panel></aside>
@@ -228,7 +242,7 @@
             <label>Контакт<input id="bookingContact" autocomplete="email tel" /></label>
             <label>Запрос<textarea id="bookingRequest" rows="4" maxlength="1000"></textarea></label>
             <div id="turnstileBooking" class="turnstile-box" data-turnstile-action="booking"></div>
-            <button class="dark-button" type="submit">Создать заявку</button>
+            <button class="dark-button" type="submit">Отправить заявку</button>
             <p id="bookingStatus" class="status-text"></p>
           </form>
         </div>
@@ -237,8 +251,8 @@
       <section class="page" data-page="chat" aria-labelledby="chat-title">
         <div class="page-heading">
           <p>/chat</p>
-          <h1 id="chat-title">Web-chat</h1>
-          <span>Статический интерфейс отправляет сообщения на endpoint и получает ответы через `fetch` с cookies.</span>
+          <h1 id="chat-title">Чат</h1>
+          <span>Коротко опишите ситуацию или вопрос перед записью. После согласия диалог сохранится в рамках текущего обращения, а ответ появится здесь.</span>
         </div>
         <div class="flow-grid">
           <aside class="consent-gate" data-consent-panel></aside>
@@ -273,7 +287,7 @@
         <div class="page-heading">
           <p>/privacy</p>
           <h1 id="privacy-title">Данные и согласие</h1>
-          <span>Публичное чтение отдельно от интерактивных действий. Чат, запись и Telegram-link включаются только после согласия.</span>
+          <span>Публичное чтение отдельно от интерактивных действий. Чат, запись и связь с Telegram включаются только после согласия.</span>
         </div>
         <div id="privacyText" class="legal-text"></div>
       </section>
@@ -293,22 +307,22 @@
     <template id="consentTemplate">
       <form class="consent-form" data-consent-form>
         <h2>Согласие</h2>
-        <p>Читать сайт можно без согласия. Для чата, записи и Telegram-link нужно явно принять условия.</p>
+        <p>Читать сайт можно без согласия. Для чата, записи и связи с Telegram нужно явно принять условия.</p>
         <label>Имя или псевдоним<input data-consent-name autocomplete="name" placeholder="Как к вам обращаться" /></label>
         <label>Контакт для записи<input data-consent-contact autocomplete="email tel" placeholder="Telegram, телефон или email" /></label>
         <label class="checkbox-line">
           <input data-consent-accepted type="checkbox" />
           <span>Я прочитал(а) текст согласия и понимаю, какие данные будут обработаны.</span>
         </label>
-        <details>
-          <summary>Текст согласия и политики</summary>
+        <div class="consent-open-text">
+          <h3>Текст согласия и политики</h3>
           <div class="legal-text" data-consent-text></div>
-        </details>
+        </div>
         <button class="dark-button" type="submit">Принять согласие</button>
         <p class="status-text" data-consent-status></p>
       </form>
     </template>
 
-    <script src="/site/site.js?v=20260620-2" defer></script>
+    <script src="/site/site.js?v=20260620-3" defer></script>
   </body>
 </html>

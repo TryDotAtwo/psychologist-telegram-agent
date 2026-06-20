@@ -327,7 +327,7 @@ async function handleSiteChat(env: Env, session: SiteSession, text: string): Pro
     lastUserText: text,
     messageCount: (await readSiteTranscript(env, session.id)).filter((message) => message.role === "user").length,
     tags: ["site"],
-    nextAction: "Ответить в web-chat или предложить связать Telegram."
+    nextAction: "Ответить в чат на сайте или предложить связать Telegram."
   });
   const botConfig = await readConfig(env);
   const turns = (await readSiteTranscript(env, session.id)).map((message) => ({

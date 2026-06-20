@@ -9,9 +9,9 @@ const DEFAULT_CONFIG = {
   githubUrl: "https://github.com/TryDotAtwo/psychologist-telegram-agent",
   consentVersion: "2026-06-20",
   consentText:
-    "Я даю согласие на обработку данных, которые самостоятельно передаю через сайт: имя или псевдоним, контакт, сообщение в чате, запрос на запись и выбранное время. Данные нужны для ответа, записи и связи с психологом.",
+    "Я даю согласие на обработку данных, которые самостоятельно передаю через сайт: имя или псевдоним, контакт, сообщение в чате, запрос на запись и выбранное время. Данные нужны, чтобы ответить на обращение, записать на консультацию и сохранить понятный контекст диалога.",
   privacyText:
-    "Сайт использует отдельную site-session cookie на 24 часа. Cookie содержит только случайный идентификатор. Читать сайт и блог можно без согласия. Чат, запись, Telegram-link и хранение профиля включаются только после явного согласия."
+    "Сайт использует техническую cookie на 24 часа. Она содержит только случайный идентификатор и не хранит имя, диагнозы или переписку. Читать сайт и блог можно без согласия. Чат, запись, связь с Telegram и хранение профиля включаются только после явного согласия. Данные не публикуются, не попадают в статьи и нужны только для ответа, записи и сопровождения."
 };
 
 const DEFAULT_SERVICES = [
@@ -47,7 +47,7 @@ const FALLBACK_ARTICLES = [
     title: "Почему инструкция к себе работает лучше советов",
     summary: "Как персональные правила и понятные алгоритмы уменьшают внутренний шум и помогают принимать решения без самонасилия.",
     tags: ["самопонимание", "стратегии", "практика"],
-    coverImageUrl: "/site/assets/blog-thumb-map.png",
+    coverImageUrl: "/site/assets/mask-map-reference.png",
     bodyMarkdown:
       "## Смысл инструкции к себе\n\nСоветы часто звучат красиво, но плохо работают без контекста. Инструкция к себе фиксирует ваш реальный паттерн: что запускает перегрузку, что помогает восстановиться, какие правила снижают хаос.\n\n## Что мы собираем\n\n- триггеры и ранние сигналы;\n- опоры и ограничения;\n- маленькие действия вместо больших обещаний;\n- критерии, по которым понятно, что стратегия работает."
   },
@@ -56,7 +56,7 @@ const FALLBACK_ARTICLES = [
     title: "РАС/СДВГ: как снижать хаос без самонасилия",
     summary: "Практические подходы к регулированию, планированию и восстановлению энергии в условиях перегрузки и неопределенности.",
     tags: ["регуляция", "сенсорика", "повседневность"],
-    coverImageUrl: "/site/assets/blog-thumb-mask.png",
+    coverImageUrl: "/site/assets/mask-reference.png",
     bodyMarkdown:
       "## Не усиливать давление\n\nЕсли внимание скачет, а сенсорная нагрузка высокая, жесткая дисциплина часто только увеличивает срыв. Рабочая система начинается с наблюдения и снижения лишней нагрузки.\n\n## Практический фокус\n\n- меньше решений в моменте;\n- понятные внешние подсказки;\n- восстановление как часть расписания;\n- правила, которые выдерживают плохой день."
   },
@@ -65,7 +65,7 @@ const FALLBACK_ARTICLES = [
     title: "Маски и энергия: где проходит граница",
     summary: "Почему маски истощают и как распознавать свои настоящие потребности, не теряя контакт с собой.",
     tags: ["маскинг", "границы", "идентичность"],
-    coverImageUrl: "/site/assets/blog-thumb-face.png",
+    coverImageUrl: "/site/assets/face-reference.png",
     bodyMarkdown:
       "## Маска не всегда враг\n\nИногда маска защищает и помогает пройти ситуацию. Проблема начинается, когда она становится единственным способом быть с людьми.\n\n## Что важно заметить\n\n- сколько энергии стоит контакт;\n- где вы соглашаетесь автоматически;\n- какие условия позволяют говорить честнее;\n- что можно изменить маленьким шагом."
   }
@@ -113,7 +113,7 @@ const TITLES = {
   article: "Статья",
   faq: "FAQ",
   booking: "Запись",
-  chat: "Web-chat",
+  chat: "Чат",
   contacts: "Контакты",
   privacy: "Данные и согласие"
 };
@@ -178,7 +178,7 @@ async function loadArticles() {
 function sanitizeConfig(raw) {
   const next = { ...DEFAULT_CONFIG, ...raw };
   for (const key of ["brandName", "headline", "subheadline", "bio", "consentText", "privacyText"]) {
-    next[key] = cleanText(next[key], DEFAULT_CONFIG[key]);
+    next[key] = cleanText(next[key], DEFAULT_CONFIG[key], key);
   }
   next.telegramUrl = raw.telegramUrl || DEFAULT_CONFIG.telegramUrl;
   next.githubUrl = raw.githubUrl || DEFAULT_CONFIG.githubUrl;
@@ -187,13 +187,25 @@ function sanitizeConfig(raw) {
   return next;
 }
 
-function cleanText(value, fallback) {
+function cleanText(value, fallback, key) {
   const text = String(value || "").trim();
-  return !text || looksMojibake(text) ? fallback : text;
+  return !text || looksMojibake(text) || looksLegacyDefault(text, key) ? fallback : text;
 }
 
 function looksMojibake(text) {
   return /(Рќ|Рџ|РЎ|Рґ|Рё|СЃ|С‚|СЊ|СЏ|СЋ|С‡|С€|В·|В«|В»)/.test(text);
+}
+
+function looksLegacyDefault(text, key) {
+  const legacy = {
+    brandName: [/^НейроПсихолог$/],
+    headline: [/^Психологические консультации для нейроотличных взрослых$/],
+    subheadline: [/^РАС, СДВГ, перегрузки, адаптация и коммуникация\./],
+    bio: [/^Онлайн-консультации для взрослых людей с РАС/],
+    consentText: [/^Я понимаю, что при обращении через сайт или бота/],
+    privacyText: [/^Сайт и Telegram-бот обрабатывают данные только для ответа/]
+  };
+  return (legacy[key] || []).some((pattern) => pattern.test(text));
 }
 
 function renderAll() {
@@ -249,7 +261,7 @@ function renderServices() {
       return `
         <article class="service-row">
           <h2>${escapeHtml(service.title)}</h2>
-          <p>${escapeHtml(service.description || "Формат и длительность задаются в dashboard.")}</p>
+          <p>${escapeHtml(service.description || "Формат и длительность можно уточнить перед записью.")}</p>
           <p><b>${Number(service.durationMinutes || 60)} минут</b></p>
           <p>${escapeHtml(price)}</p>
         </article>
@@ -347,7 +359,7 @@ function renderConsentPanels() {
       panel.innerHTML = `
         <div class="consent-ready">
           <h2>Согласие принято</h2>
-          <p>Доступны web-chat, запись и Telegram-link. Cookie содержит только случайный site-session id.</p>
+          <p>Доступны чат, запись и связь с Telegram. Технический идентификатор сессии содержит только случайную строку.</p>
           <a class="line-button" href="/site/privacy" data-link>Открыть политику</a>
         </div>
       `;
@@ -369,12 +381,12 @@ function renderConsentState() {
   nodes.bookingForm.querySelector("button").disabled = !ready;
   nodes.telegramButton.disabled = !ready;
   if (!ready) {
-    nodes.chatLog.innerHTML = `<div class="empty-state">Примите согласие, чтобы начать web-chat. Чтение сайта и блога доступно без согласия.</div>`;
+    nodes.chatLog.innerHTML = `<div class="empty-state">Примите согласие, чтобы начать чат на сайте. Чтение сайта и блога доступно без согласия.</div>`;
     nodes.chatStatus.textContent = "Чат заблокирован до согласия.";
     nodes.bookingStatus.textContent = "Запись заблокирована до согласия.";
     nodes.telegramStatus.textContent = "Связка Telegram заблокирована до согласия.";
   } else {
-    nodes.chatStatus.textContent = siteConfig.webBotEnabled ? "" : "Web-chat временно отключен в dashboard.";
+    nodes.chatStatus.textContent = siteConfig.webBotEnabled ? "" : "Чат временно отключен в панели.";
     if (nodes.bookingStatus.textContent === "Запись заблокирована до согласия.") nodes.bookingStatus.textContent = "";
     if (nodes.telegramStatus.textContent === "Связка Telegram заблокирована до согласия.") nodes.telegramStatus.textContent = "";
   }

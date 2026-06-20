@@ -225,9 +225,51 @@ label {
   padding: clamp(22px, 3.6vw, 48px) clamp(20px, 3vw, 42px);
 }
 
+.map-art {
+  position: relative;
+  width: 100%;
+}
+
+.map-art img,
 .map-figure img {
   width: 100%;
   border: 0;
+}
+
+.water-animation {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.river-flow,
+.lake-wave {
+  fill: none;
+  stroke: var(--line);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.river-flow {
+  stroke-width: 1.15;
+  stroke-dasharray: 10 18;
+  opacity: 0.28;
+}
+
+.river-flow-b {
+  stroke-width: 0.85;
+  stroke-dasharray: 6 20;
+  opacity: 0.22;
+}
+
+.lake-wave {
+  stroke-width: 0.9;
+  opacity: 0.22;
+  transform-box: fill-box;
+  transform-origin: center;
 }
 
 .home-grid {
@@ -377,6 +419,24 @@ label {
   padding: clamp(26px, 5vw, 64px);
 }
 
+.reference-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-bottom: 1px solid var(--line);
+}
+
+.reference-strip img {
+  width: 100%;
+  aspect-ratio: 1.08;
+  object-fit: contain;
+  border-right: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.reference-strip img:last-child {
+  border-right: 0;
+}
+
 .price-table {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -448,10 +508,11 @@ label {
 }
 
 .article-row img {
-  width: 208px;
-  height: 100px;
-  object-fit: cover;
+  width: 210px;
+  height: 142px;
+  object-fit: contain;
   border: 1px solid var(--line);
+  background: var(--paper);
 }
 
 .article-tags {
@@ -566,11 +627,6 @@ label {
   margin: 2px 0 0;
 }
 
-details {
-  border: 1px solid var(--line);
-  padding: 12px 14px;
-}
-
 summary { cursor: pointer; }
 
 .legal-text {
@@ -583,8 +639,21 @@ summary { cursor: pointer; }
 .legal-text p { margin: 0; }
 
 .consent-form .legal-text {
-  padding: 12px 0 0;
+  padding: 0;
   font-size: 13px;
+}
+
+.consent-open-text {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+}
+
+.consent-open-text h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
 }
 
 .chat-log {
@@ -675,14 +744,63 @@ summary { cursor: pointer; }
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .map-figure img,
+  .map-art img,
   .wide-reference,
   .process-preview {
     transition: transform 450ms ease;
   }
 
-  .map-figure:hover img {
+  .map-figure:hover .map-art img {
     transform: translateY(-2px);
+  }
+
+  .river-flow {
+    animation: river-current 22s linear infinite;
+  }
+
+  .river-flow-b {
+    animation-duration: 28s;
+    animation-direction: reverse;
+  }
+
+  .lake-wave-a {
+    animation: lake-breath 9s ease-in-out infinite;
+  }
+
+  .lake-wave-b {
+    animation: lake-breath 11s ease-in-out 1.5s infinite;
+  }
+
+  .lake-wave-c {
+    animation: lake-breath-soft 13s ease-in-out 0.8s infinite;
+  }
+}
+
+@keyframes river-current {
+  to {
+    stroke-dashoffset: -180;
+  }
+}
+
+@keyframes lake-breath {
+  0%, 100% {
+    opacity: 0.16;
+    transform: scale(0.992);
+  }
+  50% {
+    opacity: 0.34;
+    transform: scale(1.018);
+  }
+}
+
+@keyframes lake-breath-soft {
+  0%, 100% {
+    opacity: 0.12;
+    transform: translateY(0) scaleX(0.995);
+  }
+  50% {
+    opacity: 0.28;
+    transform: translateY(2px) scaleX(1.012);
   }
 }
 
@@ -726,6 +844,7 @@ summary { cursor: pointer; }
 
   .three-columns,
   .text-grid,
+  .reference-strip,
   .price-table,
   .services-list {
     grid-template-columns: 1fr;
@@ -733,6 +852,7 @@ summary { cursor: pointer; }
 
   .three-columns article,
   .text-grid article,
+  .reference-strip img,
   .price-table div,
   .service-row {
     border-right: 0;
@@ -780,7 +900,7 @@ summary { cursor: pointer; }
     overflow-x: auto;
   }
 
-  .map-figure img {
+  .map-art {
     width: 900px;
     max-width: none;
   }
