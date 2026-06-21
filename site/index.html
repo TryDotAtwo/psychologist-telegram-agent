@@ -51,16 +51,18 @@
           </div>
           <figure class="map-figure">
             <div class="map-art" aria-label="Карта маршрута от точки А к жизни по своим правилам">
-              <img src="/site/assets/life-map-reference.png" alt="" />
-              <svg class="map-water-animation" viewBox="0 0 1006 320" aria-hidden="true" focusable="false">
-                <g class="lake-ripples">
-                  <ellipse class="lake-ripple lake-ripple-a" cx="280" cy="205" rx="52" ry="18" />
-                  <ellipse class="lake-ripple lake-ripple-b" cx="280" cy="205" rx="52" ry="18" />
-                  <ellipse class="lake-ripple lake-ripple-c" cx="280" cy="205" rx="52" ry="18" />
-                </g>
-                <g class="river-current">
-                  <path class="river-thread river-thread-a" d="M414 38 C449 52 447 82 420 103 C398 121 404 146 436 162 C474 181 476 210 440 240" />
-                  <path class="river-thread river-thread-b" d="M435 36 C462 55 454 82 431 105 C415 122 424 145 452 160 C485 178 486 205 457 238" />
+              <svg class="map-animation" viewBox="0 0 1006 320" role="img" aria-label="Карта маршрута с медленным движением воды">
+                <image href="/site/assets/life-map-reference.png" x="0" y="0" width="1006" height="320" preserveAspectRatio="xMidYMid meet" />
+                <g class="lake-contours" aria-hidden="true">
+                  <path class="lake-contour contour-a" d="M188 198 C219 178 271 172 313 181 C354 190 378 213 365 235 C352 258 294 269 244 259 C195 249 161 222 188 198Z">
+                    <animate attributeName="d" dur="42s" repeatCount="indefinite" values="M188 198 C219 178 271 172 313 181 C354 190 378 213 365 235 C352 258 294 269 244 259 C195 249 161 222 188 198Z;M184 200 C217 176 274 170 316 182 C357 194 381 216 363 237 C345 258 292 266 242 257 C193 248 158 224 184 200Z;M190 197 C222 180 269 174 311 180 C353 186 376 211 367 233 C358 257 296 271 246 260 C198 250 164 220 190 197Z;M188 198 C219 178 271 172 313 181 C354 190 378 213 365 235 C352 258 294 269 244 259 C195 249 161 222 188 198Z" />
+                  </path>
+                  <path class="lake-contour contour-b" d="M214 204 C241 190 286 187 321 195 C348 201 360 219 346 234 C329 252 280 255 241 247 C207 240 186 221 214 204Z">
+                    <animate attributeName="d" dur="36s" repeatCount="indefinite" values="M214 204 C241 190 286 187 321 195 C348 201 360 219 346 234 C329 252 280 255 241 247 C207 240 186 221 214 204Z;M211 205 C239 188 288 185 323 196 C350 204 359 222 343 236 C325 250 279 253 239 246 C205 239 185 222 211 205Z;M216 202 C244 191 284 188 319 194 C346 199 362 218 348 232 C333 250 282 257 243 248 C209 241 189 219 216 202Z;M214 204 C241 190 286 187 321 195 C348 201 360 219 346 234 C329 252 280 255 241 247 C207 240 186 221 214 204Z" />
+                  </path>
+                  <path class="lake-contour contour-c" d="M237 209 C262 199 300 199 322 207 C341 214 338 229 314 238 C286 248 246 243 231 229 C220 220 222 215 237 209Z">
+                    <animate attributeName="d" dur="31s" repeatCount="indefinite" values="M237 209 C262 199 300 199 322 207 C341 214 338 229 314 238 C286 248 246 243 231 229 C220 220 222 215 237 209Z;M235 210 C261 198 302 198 324 208 C340 216 336 231 312 238 C284 246 244 242 229 228 C219 219 222 214 235 210Z;M239 208 C264 201 298 199 320 206 C340 212 341 228 316 237 C288 249 248 244 232 230 C221 220 223 214 239 208Z;M237 209 C262 199 300 199 322 207 C341 214 338 229 314 238 C286 248 246 243 231 229 C220 220 222 215 237 209Z" />
+                  </path>
                 </g>
               </svg>
             </div>
