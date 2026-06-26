@@ -5,7 +5,7 @@ const DEFAULT_CONFIG = {
   headline: "Психолог как карта, а не костыль",
   subheadline: "Системно, научно, с нейронками",
   bio: "Психологическая работа для взрослых с РАС/СДВГ: ясно, научно, без давления.",
-  telegramUrl: "https://t.me/practicing_autist_bot",
+  telegramUrl: "https://t.me/ASD_there",
   githubUrl: "https://github.com/TryDotAtwo/psychologist-telegram-agent",
   consentVersion: "2026-06-20",
   consentText:
@@ -126,79 +126,10 @@ async function init() {
   await loadSiteConfig();
   await loadArticles();
   renderAll();
-  applyEditorialText();
   routeToCurrentLocation(false);
   renderTurnstileWhenReady();
 }
 
-function applyEditorialText() {
-  const homePriceItems = document.querySelectorAll(".pricing-panel .plain-list li");
-  if (homePriceItems[2]) homePriceItems[2].textContent = "стоимость подбирается так, чтобы не быть обременительной";
-
-  const priceHeading = document.querySelector('[data-page="prices"] .page-heading span');
-  if (priceHeading) {
-    priceHeading.textContent =
-      "Без пакетов и давления. Цена консультации не должна быть обременительной: условия обсуждаются вместе с клиентом, чтобы помощь оставалась реальной, а не превращалась в дополнительную нагрузку.";
-  }
-  const priceRows = document.querySelectorAll(".price-table > div");
-  if (priceRows[3]) {
-    priceRows[3].innerHTML =
-      "<b>Индивидуальные условия</b><strong>вплоть до 6-10 бесплатных сессий</strong><span>Для РАС/СДВГ и другой нейроотличности в тяжелой жизненной ситуации.</span>";
-  }
-  const notice = document.querySelector('[data-page="prices"] .notice');
-  if (notice) {
-    notice.textContent =
-      "Первичная консультация-знакомство длится 30 минут и выбирается через дашборд/календарь. Оплата после встречи. Никаких пакетов и обязательств.";
-  }
-
-  const blogHeading = document.querySelector('[data-page="blog"] .page-heading span');
-  if (blogHeading) {
-    blogHeading.textContent =
-      "Статьи автоматически собираются из Telegram-канала психолога: связанные посты склеиваются в один материал, а ключевые слова и SEO можно доработать агентом без доступа к приватным данным.";
-  }
-
-  const chatHeading = document.querySelector('[data-page="chat"] .page-heading span');
-  if (chatHeading) {
-    chatHeading.textContent =
-      "Коротко опишите ситуацию или вопрос перед записью. После согласия сообщение сохранится в рамках текущего обращения.";
-  }
-
-  const faqItems = document.querySelectorAll('[data-page="faq"] details');
-  if (faqItems[1]?.querySelector("p")) {
-    faqItems[1].querySelector("p").textContent =
-      "Сообщение помогает понять запрос перед записью. Если нужен личный ответ, психолог продолжит общение в выбранном вами канале.";
-  }
-  if (faqItems[3]?.querySelector("summary")) faqItems[3].querySelector("summary").textContent = "Как обсуждаются индивидуальные условия?";
-  if (faqItems[3]?.querySelector("p")) {
-    faqItems[3].querySelector("p").textContent =
-      "Базовая цена прозрачная, но помощь не должна становиться обременительной. Условия можно подобрать вместе, включая бесплатные сессии для нейроотличных людей в тяжелой ситуации.";
-  }
-
-  const aboutGrid = document.querySelector('[data-page="about"] .text-grid');
-  if (aboutGrid && !document.getElementById("aboutTelegramChannel")) {
-    const article = document.createElement("article");
-    article.id = "aboutTelegramChannel";
-    article.innerHTML =
-      '<h2>Telegram-канал</h2><p>Публичные тексты и заметки психолога публикуются в канале ASD_there. Блог сайта собирается из этих постов и остается отделен от клиентских чатов.</p><a class="line-button" href="https://t.me/ASD_there" target="_blank" rel="noopener noreferrer">Открыть канал</a>';
-    aboutGrid.append(article);
-  }
-
-  const contactOptions = document.querySelector(".contact-options");
-  if (contactOptions && !document.getElementById("contactTelegramChannel")) {
-    const link = document.createElement("a");
-    link.id = "contactTelegramChannel";
-    link.className = "line-button";
-    link.href = "https://t.me/ASD_there";
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-    link.textContent = "Telegram-канал ASD_there";
-    contactOptions.insertBefore(link, document.getElementById("createTelegramLink"));
-  }
-  if (nodes.footerTelegram) {
-    nodes.footerTelegram.href = "https://t.me/ASD_there";
-    nodes.footerTelegram.textContent = "Telegram-канал";
-  }
-}
 
 function bindNavigation() {
   document.addEventListener("click", (event) => {

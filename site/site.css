@@ -231,50 +231,19 @@ label {
   overflow: hidden;
 }
 
-.map-animation,
 .map-figure img {
   width: 100%;
   border: 0;
 }
 
-.map-animation {
-  display: block;
-  overflow: visible;
-}
-
-.lake-contour {
-  fill: none;
-  stroke: var(--line);
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  vector-effect: non-scaling-stroke;
-  transform-box: fill-box;
-  transform-origin: center;
-}
-
-.contour-a {
-  stroke-width: 0.72;
-  opacity: 0.16;
-}
-
-.contour-b {
-  stroke-width: 0.68;
-  opacity: 0.18;
-}
-
-.contour-c {
-  stroke-width: 0.62;
-  opacity: 0.2;
-}
-
 .home-grid {
   display: grid;
-  grid-template-columns: 0.26fr 0.4fr 0.34fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   border-bottom: 1px solid var(--line);
 }
 
 .home-panel {
-  min-height: 300px;
+  min-height: 240px;
   display: grid;
   align-content: start;
   gap: 18px;
@@ -385,7 +354,7 @@ label {
   display: grid;
   align-content: start;
   gap: 16px;
-  padding: clamp(24px, 4vw, 46px);
+  padding: clamp(20px, 3.2vw, 36px);
   border-right: 1px solid var(--line);
 }
 
@@ -400,8 +369,8 @@ label {
   object-fit: contain;
   background: var(--paper);
   border-bottom: 1px solid var(--line);
-  margin: calc(clamp(24px, 4vw, 46px) * -1) calc(clamp(24px, 4vw, 46px) * -1) 8px;
-  width: calc(100% + clamp(24px, 4vw, 46px) * 2);
+  margin: calc(clamp(20px, 3.2vw, 36px) * -1) calc(clamp(20px, 3.2vw, 36px) * -1) 8px;
+  width: calc(100% + clamp(20px, 3.2vw, 36px) * 2);
 }
 
 .page[data-page="about"] .reference-strip {
@@ -461,6 +430,12 @@ label {
 }
 
 .price-table div:last-child { border-right: 0; }
+.price-table b,
+.price-table strong,
+.price-table span {
+  display: block;
+}
+
 .price-table b { font-weight: 500; }
 .price-table strong {
   font-size: clamp(26px, 3vw, 44px);
@@ -755,77 +730,7 @@ summary { cursor: pointer; }
   .process-preview {
     transition: transform 450ms ease;
   }
-
-  .contour-a {
-    animation: contour-breathe-a 38s ease-in-out infinite;
-  }
-
-  .contour-b {
-    animation: contour-breathe-b 34s ease-in-out 7s infinite;
-  }
-
-  .contour-c {
-    animation: contour-breathe-c 29s ease-in-out 13s infinite;
-  }
 }
-
-@keyframes contour-breathe-a {
-  0% {
-    opacity: 0.08;
-    transform: translate(-1px, 0) scale(0.992);
-  }
-  34% {
-    opacity: 0.2;
-    transform: translate(1px, -0.5px) scale(1.018);
-  }
-  72% {
-    opacity: 0.13;
-    transform: translate(0.5px, 0.7px) scale(1.035);
-  }
-  100% {
-    opacity: 0.08;
-    transform: translate(-1px, 0) scale(0.992);
-  }
-}
-
-@keyframes contour-breathe-b {
-  0% {
-    opacity: 0.1;
-    transform: translate(0.8px, 0.2px) scale(0.985);
-  }
-  40% {
-    opacity: 0.22;
-    transform: translate(-0.8px, -0.7px) scale(1.016);
-  }
-  76% {
-    opacity: 0.12;
-    transform: translate(0.3px, 0.9px) scale(1.028);
-  }
-  100% {
-    opacity: 0.1;
-    transform: translate(0.8px, 0.2px) scale(0.985);
-  }
-}
-
-@keyframes contour-breathe-c {
-  0% {
-    opacity: 0.12;
-    transform: translate(0, 0.5px) scale(0.98);
-  }
-  45% {
-    opacity: 0.24;
-    transform: translate(0.7px, -0.4px) scale(1.014);
-  }
-  80% {
-    opacity: 0.14;
-    transform: translate(-0.5px, 0.6px) scale(1.024);
-  }
-  100% {
-    opacity: 0.12;
-    transform: translate(0, 0.5px) scale(0.98);
-  }
-}
-
 @media (max-width: 1100px) {
   .site-shell {
     grid-template-columns: 1fr;

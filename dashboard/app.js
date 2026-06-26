@@ -557,16 +557,10 @@ function collectArticlePatch() {
 }
 
 function ensureTelegramArticleSyncButton() {
-  const createButton = document.getElementById("createArticleDraft");
-  const generateButton = document.getElementById("generateArticleDraft");
-  const row = createButton?.parentElement || generateButton?.parentElement;
-  if (!row || document.getElementById("syncTelegramArticles")) return;
-  const button = document.createElement("button");
-  button.id = "syncTelegramArticles";
-  button.type = "button";
-  button.textContent = "Синхронизировать Telegram";
+  const button = document.getElementById("syncTelegramArticles");
+  if (!button || button.dataset.bound === "true") return;
+  button.dataset.bound = "true";
   button.onclick = syncTelegramArticles;
-  row.prepend(button);
 }
 
 async function syncTelegramArticles() {
@@ -578,32 +572,6 @@ async function syncTelegramArticles() {
   document.getElementById("articleEditorStatus").textContent = result.ok
     ? `Синхронизировано: новых ${result.imported || 0}, обновлено ${result.updated || 0}, постов прочитано ${result.posts || 0}.`
     : `Синхронизация не удалась: ${result.state?.lastError || "канал временно недоступен"}.`;
-}
-
-async function createArticleDraft() {
-  const article = await api("/api/site/articles", {
-    method: "POST",
-    body: JSON.stringify({ title: "Новая статья", bodyMarkdown: "## Черновик\n\nТекст статьи.", status: "draft" })
-  });
-  siteArticles = [article, ...siteArticles.filter((item) => item.id !== article.id)];
-  selectedSiteArticleId = article.id;
-  renderSite();
-  document.getElementById("articleEditorStatus").textContent = "Draft создан.";
-}
-
-async function generateArticleDraft() {
-  document.getElementById("articleEditorStatus").textContent = "AI готовит draft из публичного контекста...";
-  const article = await api("/api/site/articles/generate", {
-    method: "POST",
-    body: JSON.stringify({
-      topic: document.getElementById("articleTopic").value.trim(),
-      tone: document.getElementById("articleTone").value.trim()
-    })
-  });
-  siteArticles = [article, ...siteArticles.filter((item) => item.id !== article.id)];
-  selectedSiteArticleId = article.id;
-  renderSite();
-  document.getElementById("articleEditorStatus").textContent = "AI draft создан. Проверьте перед публикацией.";
 }
 
 async function saveSelectedArticle() {

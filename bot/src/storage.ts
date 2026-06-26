@@ -45,7 +45,7 @@ export const DEFAULT_SITE_CONFIG: SiteConfig = {
   subheadline: "Системно, научно, с нейронками",
   bio:
     "Психологическая работа для взрослых с РАС, СДВГ, смешанной нейроотличностью или подозрением на нее. Формат спокойный и системный: понять паттерны, собрать личную карту, научиться решать жизненные задачи без постоянной опоры на психолога.",
-  telegramUrl: "https://t.me/practicing_autist_bot",
+  telegramUrl: "https://t.me/ASD_there",
   githubUrl: "https://github.com/TryDotAtwo/psychologist-telegram-agent",
   consentVersion: "2026-06-20",
   consentText:
