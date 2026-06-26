@@ -123,11 +123,15 @@ init();
 async function init() {
   bindNavigation();
   bindStaticForms();
-  await loadSiteConfig();
-  await loadArticles();
-  renderAll();
   routeToCurrentLocation(false);
-  renderTurnstileWhenReady();
+  try {
+    await loadSiteConfig();
+    await loadArticles();
+    renderAll();
+  } finally {
+    routeToCurrentLocation(false);
+    renderTurnstileWhenReady();
+  }
 }
 
 
